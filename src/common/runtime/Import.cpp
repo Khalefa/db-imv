@@ -136,8 +136,14 @@ inline void parse(ColumnConfig& c, std::vector<void*>& col, std::string& line,
 
    const char* start = line.data() + begin;
    end = line.find_first_of('|', begin);
+#if !LINE
+   // ending without '|'
+   if((int)end==-1) {
+     end = line.size();
+   }
+#endif
    size_t size = end - begin;
-
+   assert(size>0 && size <10000);
 #define D(type)                                                                \
    reinterpret_cast<std::vector<type>&>(col).emplace_back(                     \
        type::castString(start, size));                                         \

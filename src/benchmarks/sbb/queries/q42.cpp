@@ -17,6 +17,7 @@ using namespace runtime;
 using namespace std;
 
 namespace ssb {
+#define CHANGE 1
 
 // select d_year, s_nation, p_category, sum(lo_revenue - lo_supplycost) as
 // profit
@@ -273,7 +274,11 @@ std::unique_ptr<Q42Builder::Q42> Q42Builder::getQuery() {
                                   sizeof(pos_t))) // filter for lineorder
        .addProbeKey(Column(lineorder, "lo_custkey"), Buffer(lineorder_supplier),
                     conf.hash_sel_int32_t_col(),
+#if CHANGE
+                    Buffer(lineorder_supplier_customer, sizeof(pos_t)),
+#else
                     Buffer(lineorder_supplier_customer),
+#endif
                     primitives::keys_equal_int32_t_col);
 
    HashJoin(Buffer(lineorder_part, sizeof(pos_t)), conf.joinAll())
@@ -292,7 +297,12 @@ std::unique_ptr<Q42Builder::Q42> Q42Builder::getQuery() {
                                   sizeof(pos_t))) // filter for s_nation
        .addProbeKey(
            Column(lineorder, "lo_partkey"), Buffer(lineorder_supplier_customer),
-           conf.hash_sel_int32_t_col(), Buffer(lineorder_customer_part),
+           conf.hash_sel_int32_t_col(),
+#if CHANGE
+           Buffer(lineorder_customer_part, sizeof(pos_t)),
+#else
+           Buffer(lineorder_customer_part),
+#endif
            primitives::keys_equal_int32_t_col);
 
    // filter for p_category is lineorder_date

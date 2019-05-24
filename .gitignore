@@ -38,3 +38,8 @@ plot/*.tex
 *.exe
 *.out
 *.app
+
+# Changes
+*.cproject
+*.project
+data/
