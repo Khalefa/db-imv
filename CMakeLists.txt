@@ -20,16 +20,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 OPTION(VECTORWISE_BRANCHING "Use branching vectorwise primitives" OFF)
 OPTION(AUTOVECTORIZE "Allow the compiler to autovectorize" OFF)
 OPTION(DATADIR "Directory containing testdata" "")
-OPTION(AVX512EXPERIMENTS OFF)
-OPTION(HARDWARE_BENCHMARKS OFF)
+OPTION(AVX512EXPERIMENTS ON)
+OPTION(HARDWARE_BENCHMARKS ON)
 OPTION(INTERPRET_SEPARATE OFF)
 OPTION(HASH_SIZE_32 OFF)
 
 
 
 # Compiler flags for the different targets
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=skylake-avx512 -g -mtune=native -std=c++14 -fPIC -Wall -Wextra -Wno-psabi -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -Wall -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=skylake-avx512 -g -mtune=native -std=c++14 -fPIC -Wall -Wextra -Wno-psabi -Wattributes -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -Wall -Wextra -fno-omit-frame-pointer -Wattributes -march=native -fdiagnostics-color -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
 
 
 if(LINUX)
@@ -319,3 +319,16 @@ if(AVX512EXPERIMENTS)
     PRIVATE src)
   target_link_libraries(run_join vectorwise common ${TBB_LIBRARIES}  ${JEVENTSLIB})
 endif(AVX512EXPERIMENTS)
+
+
+ add_executable(join_test src/imv/joinTest.cpp)
+  SET_TARGET_PROPERTIES(join_test PROPERTIES
+    COMPILE_FLAGS "-march=skylake-avx512"
+    )
+  target_include_directories(join_test PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    PRIVATE src)
+
+  target_link_libraries(join_test tpch hyper vectorwise common  ${JEVENTSLIB})
+
