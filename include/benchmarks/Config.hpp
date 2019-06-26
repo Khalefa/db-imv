@@ -4,7 +4,7 @@
 
 struct ExperimentConfig{
   typedef vectorwise::pos_t (vectorwise::Hashjoin::*joinFun)();
-  bool useSimdJoin = false;
+  bool useSimdJoin = true;
   bool useSimdHash = false;
   bool useSimdSel = false;
   bool useSimdProj = false;

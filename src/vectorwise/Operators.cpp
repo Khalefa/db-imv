@@ -9,7 +9,7 @@
 #include <x86intrin.h>
 
 namespace vectorwise {
-
+//#define __AVX512F__ 1
 using runtime::barrier;
 
 size_t Select::next() {
@@ -107,7 +107,44 @@ size_t ResultWriter::next() {
    }
    return found;
 }
+pos_t Hashjoin::joinAMAC(){
+  size_t found = 0;
 
+  return found;
+}
+pos_t Hashjoin::joinRow(){
+  size_t found = 0;
+  do {
+    for (auto entry = cont.buildMatch; entry != shared.ht.end();entry = entry->next) {
+       if (entry->hash == cont.probeHash) {
+          buildMatches[found] = entry;
+          probeMatches[found++] = cont.nextProbe;
+          if (found == batchSize) {
+             // output buffers are full, save state for continuation
+             cont.buildMatch = entry->next;
+             if(cont.buildMatch == shared.ht.end()) {
+               ++cont.nextProbe;
+             }
+             return batchSize;
+          }
+       }
+    }
+    if (cont.buildMatch != shared.ht.end()) ++cont.nextProbe;
+
+    if(cont.nextProbe < cont.numProbes) {
+      cont.probeHash = probeHashes[cont.nextProbe];
+      cont.buildMatch = shared.ht.find_chain_tagged(cont.probeHash);
+      if(cont.buildMatch == shared.ht.end()) {
+        ++cont.nextProbe;
+      }
+    }else {
+      break;
+    }
+  }while(true);
+  cont.buildMatch = shared.ht.end();
+  cont.nextProbe = cont.numProbes;
+  return found;
+}
 pos_t Hashjoin::joinAll() {
    size_t found = 0;
    // perform continuation

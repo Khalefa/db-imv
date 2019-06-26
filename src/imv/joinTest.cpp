@@ -55,7 +55,7 @@ bool join_hyper(Database& db, size_t nrThreads) {
   parallel_insert(entries1, ht1);
 
   // look up the hash table 1
-  auto found2 = tbb::parallel_reduce(range(0, ord.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+  auto found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
     auto found = f;
     for (size_t i = r.begin(), end = r.end(); i != end; ++i)
     if ( ht1.contains(l_orderkey[i])) {
@@ -70,10 +70,54 @@ bool join_hyper(Database& db, size_t nrThreads) {
   return true;
 }
 
-bool join_vectorwise(Database& db, size_t nrThreads) {
+std::unique_ptr<Q3Builder::Q3> Q3Builder::getQuery() {
+   using namespace vectorwise;
+   auto result = Result();
+   previous = result.resultWriter.shared.result->participate();
+   auto r = make_unique<Q3>();
 
-  return true;
+   auto order = Scan("orders");
+   auto lineitem = Scan("lineitem");
+
+   HashJoin(Buffer(cust_ord, sizeof(pos_t)), conf.joinAll())
+       .addBuildKey(Column(order,"o_orderkey"),conf.hash_int32_t_col(),primitives::scatter_int32_t_col)
+       .addProbeKey(Column(lineitem, "l_orderkey"),          //
+                    conf.hash_int32_t_col(),         //
+                    primitives::keys_equal_int32_t_col);
+
+   // count(*)
+   FixedAggregation(Expression().addOp(primitives::aggr_static_count_star,
+                                       Value(&r->count)));
+
+//   result.addValue("count", Buffer(cust_ord))
+//       .finalize();
+
+   r->rootOp = popOperator();
+   return r;
 }
+bool join_vectorwise(Database& db, size_t nrThreads, size_t vectorSize) {
+   using namespace vectorwise;
+   WorkerGroup workers(nrThreads);
+   vectorwise::SharedStateManager shared;
+   std::unique_ptr<runtime::Query> result;
+   std::atomic<int64_t> aggr;
+   aggr = 0;
+   workers.run([&]() {
+      Q3Builder builder(db, shared, vectorSize);
+      auto query = builder.getQuery();
+      /* auto found = */
+      auto n_ = query->rootOp->next();
+      if (n_) {
+         aggr.fetch_add(query->count);
+      }
+      auto leader = barrier();
+      if (leader){
+        cout<<"vectorwise join result: "<< aggr.load()<<endl;
+      }
+   });
+   return true;
+}
+
 size_t nrTuples(Database& db, std::vector<std::string> tables) {
   size_t sum = 0;
   for (auto& table : tables)
@@ -102,16 +146,22 @@ int main(int argc, char* argv[]) {
     nrThreads = atoi(argv[3]);
 
   tbb::task_scheduler_init scheduler(nrThreads);
-#if 0
+#if 1
   e.timeAndProfile("join hyper     ",
       nrTuples(tpch, {"orders", "lineitem"}),
       [&]() {
-
         join_hyper(tpch,nrThreads);
+      },
+      repetitions);
+  e.timeAndProfile("join vector    ",
+      nrTuples(tpch, {"orders", "lineitem"}),
+      [&]() {
+        join_vectorwise(tpch,nrThreads,vectorSize);
       },
       repetitions);
 #else
   join_hyper(tpch, nrThreads);
+  join_vectorwise(tpch,nrThreads,1000);
 #endif
   scheduler.terminate();
   return 0;

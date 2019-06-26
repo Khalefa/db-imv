@@ -260,6 +260,9 @@ class Hashjoin : public BinaryOperator {
    /// selection vector probeSel for probe side
    /// Implementation: For SkylakeX using AVX512
    pos_t joinSelSIMD();
+   /// similar to join in row
+   pos_t joinRow();
+   pos_t joinAMAC();
 
    virtual size_t next() override;
    ~Hashjoin();

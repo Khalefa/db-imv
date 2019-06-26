@@ -88,13 +88,20 @@ vectorwise::primitives::F4 ExperimentConfig::selsel_less_equal_int64_t_col_int64
 }
 
 ExperimentConfig::joinFun ExperimentConfig::joinAll() {
+#if CHANGE
 #ifdef __AVX512F__
-  if (useSimdJoin) return &vectorwise::Hashjoin::joinAllSIMD;
+  if (useSimdJoin)  {
+    return &vectorwise::Hashjoin::joinAllSIMD;
+  }
 #endif
   char* v;
-  if ((v = std::getenv("JoinBoncz")) && atoi(v) != 0)
+  if ((v = std::getenv("JoinBoncz")) && atoi(v) != 0) {
     return &vectorwise::Hashjoin::joinBoncz;
+  }
   return &vectorwise::Hashjoin::joinAllParallel;
+#else
+  return &vectorwise::Hashjoin::joinRow;
+#endif
 }
 
 ExperimentConfig::joinFun ExperimentConfig::joinSel() {
