@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -54,7 +55,10 @@ class Hashmap {
    inline void clear();
 
    std::atomic<EntryHeader*>* entries = nullptr;
-
+   inline void prefetchEntry(hash_t hash) {
+     if(entries!= nullptr)
+     _mm_prefetch(((char*)(entries+hash)),_MM_HINT_T0);
+   }
    hash_t mask;
    using ptr_t = uint64_t;
    const ptr_t maskPointer = (~(ptr_t)0) >> (16);
@@ -64,7 +68,7 @@ class Hashmap {
    Hashmap() = default;
    Hashmap(const Hashmap&) = delete;
    inline ~Hashmap();
-
+   inline void printSta();
  private:
    inline Hashmap::EntryHeader* ptr(Hashmap::EntryHeader* p);
    inline ptr_t tag(hash_t p);
@@ -80,6 +84,23 @@ inline Hashmap::EntryHeader* Hashmap::end() { return nullptr; }
 inline Hashmap::~Hashmap() {
   if (entries)
      mem::free_huge(entries, capacity * sizeof(std::atomic<EntryHeader*>));
+}
+inline void Hashmap::printSta(){
+  std::map<uint64_t,uint64_t>len_num;
+  for(uint64_t i =0;i<capacity;++i) {
+    auto len=0;
+    auto en = find_chain_tagged(i);
+    while(nullptr != en){
+      ++len;
+      en= en->next;
+    }
+    ++len_num[len];
+  }
+  for(auto it = len_num.begin();it != len_num.end();++it) {
+    if(it->second>0) {
+      std::cout<<"len = "<< it->first <<", num = "<< it->second<<std::endl;
+    }
+  }
 }
 
 inline Hashmap::ptr_t Hashmap::tag(Hashmap::hash_t hash) {

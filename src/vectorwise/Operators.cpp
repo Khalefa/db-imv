@@ -1,4 +1,7 @@
 #include "vectorwise/Operators.hpp"
+
+#include <assert.h>
+
 #include "common/Compat.hpp"
 #include "common/runtime/Concurrency.hpp"
 #include "common/runtime/SIMD.hpp"
@@ -7,6 +10,9 @@
 #include <stdexcept>
 #include <tuple>
 #include <x86intrin.h>
+#include <string>
+
+#include "common/runtime/Hash.hpp"
 
 namespace vectorwise {
 //#define __AVX512F__ 1
@@ -109,14 +115,116 @@ size_t ResultWriter::next() {
 }
 pos_t Hashjoin::joinAMAC(){
   size_t found = 0;
-
+  // initialization
+  if(amac_cont.k==100) {
+    for(int i=0;i<stateNum;++i) {
+      amac_state[i].stage=1;
+    }
+    amac_cont.done=0;
+    amac_cont.k=0;
+  }
+  auto probeKeys = (reinterpret_cast<int*>(((F2_Op *)(probeHash.ops[0].get()))->param1));
+  auto keyOff = ((EqualityCheck*)(keyEquality.ops[0].get()))->offset;
+  while(amac_cont.done < stateNum) {
+    amac_cont.k = (amac_cont.k >= stateNum)? 0: amac_cont.k;
+    switch(amac_state[amac_cont.k].stage) {
+#if 0
+      case 1: {
+        if(cont.nextProbe>=cont.numProbes) {
+          ++amac_cont.done;
+          amac_state[amac_cont.k].stage=3;
+       //   std::cout<<"amac done one "<<cont.numProbes<<" , "<<cont.nextProbe<<std::endl;
+          break;
+        }
+        cont.probeKey =probeKeys[cont.nextProbe];
+        cont.probeHash =(runtime::MurMurHash()(cont.probeKey,primitives::seed));
+        // prefetch the address of the beginning hash buckets
+        //shared.ht.prefetchEntry(cont.probeHash);
+        // suppose the hashEngtries reside in the cache
+        amac_state[amac_cont.k].buildMatch=shared.ht.find_chain_tagged(cont.probeHash);
+        amac_state[amac_cont.k].tuple_id = cont.nextProbe;
+        ++cont.nextProbe;
+        if(nullptr==amac_state[amac_cont.k].buildMatch) {
+          --amac_cont.k;
+          break;
+        }
+        amac_state[amac_cont.k].probeKey=cont.probeKey;
+        amac_state[amac_cont.k].stage=0;
+        _mm_prefetch((char *)(amac_state[amac_cont.k].buildMatch), _MM_HINT_T0);
+        _mm_prefetch((char *)(amac_state[amac_cont.k].buildMatch)+64, _MM_HINT_T0);
+      }break;
+#else
+      case 1: {
+        if(cont.nextProbe>=cont.numProbes) {
+          ++amac_cont.done;
+          amac_state[amac_cont.k].stage=3;
+       //   std::cout<<"amac done one "<<cont.numProbes<<" , "<<cont.nextProbe<<std::endl;
+          break;
+        }
+        cont.probeKey =probeKeys[cont.nextProbe];
+        cont.probeHash =(runtime::MurMurHash()(cont.probeKey,primitives::seed));
+        amac_state[amac_cont.k].tuple_id = cont.nextProbe;
+        ++cont.nextProbe;
+        amac_state[amac_cont.k].probeKey=cont.probeKey;
+        amac_state[amac_cont.k].probeHash = cont.probeHash;
+        _mm_prefetch((char *)(shared.ht.entries+cont.probeHash), _MM_HINT_T0);
+        amac_state[amac_cont.k].stage=2;
+      }break;
+      case 2: {
+        amac_state[amac_cont.k].buildMatch=shared.ht.find_chain_tagged(amac_state[amac_cont.k].probeHash);
+        if(nullptr==amac_state[amac_cont.k].buildMatch) {
+          amac_state[amac_cont.k].stage=1;
+          --amac_cont.k;
+        }else {
+          _mm_prefetch((char *)(amac_state[amac_cont.k].buildMatch), _MM_HINT_T0);
+          _mm_prefetch((char *)(amac_state[amac_cont.k].buildMatch)+64, _MM_HINT_T0);
+          amac_state[amac_cont.k].stage=0;
+        }
+      }break;
+#endif
+      case 0: {
+        auto entry = amac_state[amac_cont.k].buildMatch;
+        if(nullptr==entry) {
+          amac_state[amac_cont.k].stage=1;
+          --amac_cont.k;
+          break;
+        }else {
+          auto buildkey = *((addBytes((reinterpret_cast<int*>(entry)),keyOff)));
+           if ((buildkey==amac_state[amac_cont.k].probeKey)) {
+                buildMatches[found] = entry;
+                probeMatches[found++] = amac_state[amac_cont.k].tuple_id;
+           }
+           entry= entry->next;
+           if(nullptr == entry) {
+               amac_state[amac_cont.k].stage=1;
+               --amac_cont.k;
+           }else {
+               amac_state[amac_cont.k].buildMatch = entry;
+               _mm_prefetch((char *)(entry), _MM_HINT_T0);
+               _mm_prefetch((char *)(entry)+64, _MM_HINT_T0);
+           }
+           if (found == batchSize) {
+              return batchSize;
+           }
+        }
+      }break;
+    }
+    ++amac_cont.k;
+  }
+  amac_cont.k=100;
+  cont.buildMatch = shared.ht.end();
+  cont.nextProbe = cont.numProbes;
   return found;
 }
+// Note the way to get buildKey and probeKey: multi-joinkey or selective vectors
 pos_t Hashjoin::joinRow(){
+ // std::cout<<"use join row "<<std::endl;
   size_t found = 0;
   do {
     for (auto entry = cont.buildMatch; entry != shared.ht.end();entry = entry->next) {
-       if (entry->hash == cont.probeHash) {
+      auto buildkey = *((addBytes((reinterpret_cast<int*>(entry)),((EqualityCheck*)(keyEquality.ops[0].get()))->offset)));
+      if ((buildkey==cont.probeKey)) {
+//      if (entry->hash == cont.probeHash) {
           buildMatches[found] = entry;
           probeMatches[found++] = cont.nextProbe;
           if (found == batchSize) {
@@ -126,13 +234,15 @@ pos_t Hashjoin::joinRow(){
                ++cont.nextProbe;
              }
              return batchSize;
-          }
+         }
        }
     }
     if (cont.buildMatch != shared.ht.end()) ++cont.nextProbe;
 
     if(cont.nextProbe < cont.numProbes) {
-      cont.probeHash = probeHashes[cont.nextProbe];
+//      cont.probeHash = probeHashes[cont.nextProbe];
+      cont.probeKey =(reinterpret_cast<int*>(((F2_Op *)(probeHash.ops[0].get()))->param1))[cont.nextProbe];
+      cont.probeHash =runtime::MurMurHash()(cont.probeKey,primitives::seed);
       cont.buildMatch = shared.ht.find_chain_tagged(cont.probeHash);
       if(cont.buildMatch == shared.ht.end()) {
         ++cont.nextProbe;
@@ -145,13 +255,19 @@ pos_t Hashjoin::joinRow(){
   cont.nextProbe = cont.numProbes;
   return found;
 }
+#define OLD 1
 pos_t Hashjoin::joinAll() {
    size_t found = 0;
    // perform continuation
    for (auto entry = cont.buildMatch; entry != shared.ht.end();
         entry = entry->next) {
+#if OLD
       if (entry->hash == cont.probeHash) {
-         buildMatches[found] = entry;
+#else
+        auto buildkey = *((addBytes((reinterpret_cast<int*>(entry)),((EqualityCheck*)(keyEquality.ops[0].get()))->offset)));
+        if ((buildkey==cont.probeKey)) {
+#endif
+        buildMatches[found] = entry;
          probeMatches[found++] = cont.nextProbe;
          if (found == batchSize) {
             // output buffers are full, save state for continuation
@@ -162,10 +278,21 @@ pos_t Hashjoin::joinAll() {
    }
    if (cont.buildMatch != shared.ht.end()) cont.nextProbe++;
    for (size_t i = cont.nextProbe, end = cont.numProbes; i < end; ++i) {
-      auto hash = probeHashes[i];
+#if OLD
+     auto hash = probeHashes[i];
+#else
+     auto probeKey =(reinterpret_cast<int*>(((F2_Op *)(probeHash.ops[0].get()))->param1))[i];
+     auto hash = runtime::MurMurHash()(probeKey,primitives::seed);
+#endif
       for (auto entry = shared.ht.find_chain_tagged(hash);
            entry != shared.ht.end(); entry = entry->next) {
-         if (entry->hash == hash) {
+#if OLD
+        if (entry->hash == hash) {
+#else
+          auto buildkey = *((addBytes((reinterpret_cast<int*>(entry)),((EqualityCheck*)(keyEquality.ops[0].get()))->offset)));
+          if ((buildkey==probeKey)) {
+               cont.probeKey = probeKey;
+#endif
             buildMatches[found] = entry;
             probeMatches[found++] = i;
             if (found == batchSize && (entry->next || i + 1 < end)) {
@@ -786,7 +913,8 @@ pos_t Hashjoin::joinBoncz() {
    contCon.followupWrite = followupWrite;
    return 0;
 }
-
+#define JOINROW 10
+#define JOINAMAC 10
 size_t Hashjoin::next() {
    using runtime::Hashmap;
    // --- build
@@ -821,23 +949,60 @@ size_t Hashjoin::next() {
       consumed = true;
       barrier(); // wait for all threads to finish build phase
    }
+//   if(!shared.printed.load()) {
+// //    shared.printed.store(true);
+//  // shared.ht.printSta();
+//   }
    // --- lookup
-   while (true) {
-      if (cont.nextProbe >= cont.numProbes) {
-         cont.numProbes = right->next();
-         cont.nextProbe = 0;
-         if (cont.numProbes == EndOfStream) return EndOfStream;
-         probeHash.evaluate(cont.numProbes);
+   if(join == &vectorwise::Hashjoin::joinRow) {
+     while (true) {
+         if (cont.nextProbe >= cont.numProbes) {
+           cont.numProbes = right->next();
+            cont.nextProbe = 0;
+            if (cont.numProbes == EndOfStream) return EndOfStream;
+         }
+         // create join pair vectors with matching hashes (Entry*, pos), where
+         // Entry* is for the build side, pos a selection index to the right side
+         auto n = (this->*join)();
+         if (n == 0) continue;
+         // materialize build side
+         buildGather.evaluate(n);
+         return n;
       }
-      // create join pair vectors with matching hashes (Entry*, pos), where
-      // Entry* is for the build side, pos a selection index to the right side
-      auto n = (this->*join)();
-      // check key equality and remove non equal keys from join result
-      n = keyEquality.evaluate(n);
-      if (n == 0) continue;
-      // materialize build side
-      buildGather.evaluate(n);
-      return n;
+   }else if(join == &vectorwise::Hashjoin::joinAMAC) {
+     while (true) {
+       if(amac_cont.k==100) {
+          cont.numProbes = right->next();
+           cont.nextProbe = 0;
+           amac_cont.k=100;
+           if (cont.numProbes == EndOfStream) return EndOfStream;
+        }
+        // create join pair vectors with matching hashes (Entry*, pos), where
+        // Entry* is for the build side, pos a selection index to the right side
+        auto n = (this->*join)();
+        if (n == 0) continue;
+        // materialize build side
+        buildGather.evaluate(n);
+        return n;
+     }
+   }else {
+     while (true) {
+        if (cont.nextProbe >= cont.numProbes) {
+          cont.numProbes = right->next();
+           cont.nextProbe = 0;
+           if (cont.numProbes == EndOfStream) return EndOfStream;
+           probeHash.evaluate(cont.numProbes);
+        }
+        // create join pair vectors with matching hashes (Entry*, pos), where
+        // Entry* is for the build side, pos a selection index to the right side
+        auto n = (this->*join)();
+        // check key equality and remove non equal keys from join result
+       n = keyEquality.evaluate(n);
+        if (n == 0) continue;
+        // materialize build side
+        buildGather.evaluate(n);
+        return n;
+     }
    }
 }
 

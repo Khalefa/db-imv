@@ -69,7 +69,7 @@ bool join_hyper(Database& db, size_t nrThreads) {
 
   return true;
 }
-
+auto joinFun = &vectorwise::Hashjoin::joinAMAC;
 std::unique_ptr<Q3Builder::Q3> Q3Builder::getQuery() {
    using namespace vectorwise;
    auto result = Result();
@@ -79,7 +79,7 @@ std::unique_ptr<Q3Builder::Q3> Q3Builder::getQuery() {
    auto order = Scan("orders");
    auto lineitem = Scan("lineitem");
 
-   HashJoin(Buffer(cust_ord, sizeof(pos_t)), conf.joinAll())
+   HashJoin(Buffer(cust_ord, sizeof(pos_t)), joinFun)
        .addBuildKey(Column(order,"o_orderkey"),conf.hash_int32_t_col(),primitives::scatter_int32_t_col)
        .addProbeKey(Column(lineitem, "l_orderkey"),          //
                     conf.hash_int32_t_col(),         //
@@ -153,7 +153,30 @@ int main(int argc, char* argv[]) {
         join_hyper(tpch,nrThreads);
       },
       repetitions);
-  e.timeAndProfile("join vector    ",
+  joinFun = &vectorwise::Hashjoin::joinAllSIMD;
+  e.timeAndProfile("joinAllSIMD    ",
+      nrTuples(tpch, {"orders", "lineitem"}),
+      [&]() {
+        join_vectorwise(tpch,nrThreads,vectorSize);
+      },
+      repetitions);
+  joinFun = &vectorwise::Hashjoin::joinAll;
+
+  e.timeAndProfile("joinAll       ",
+      nrTuples(tpch, {"orders", "lineitem"}),
+      [&]() {
+        join_vectorwise(tpch,nrThreads,vectorSize);
+      },
+      repetitions);
+  joinFun = &vectorwise::Hashjoin::joinRow;
+  e.timeAndProfile("joinRow       ",
+      nrTuples(tpch, {"orders", "lineitem"}),
+      [&]() {
+        join_vectorwise(tpch,nrThreads,vectorSize);
+      },
+      repetitions);
+  joinFun = &vectorwise::Hashjoin::joinAMAC;
+  e.timeAndProfile("joinAMAC      ",
       nrTuples(tpch, {"orders", "lineitem"}),
       [&]() {
         join_vectorwise(tpch,nrThreads,vectorSize);

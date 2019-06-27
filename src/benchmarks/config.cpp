@@ -88,7 +88,8 @@ vectorwise::primitives::F4 ExperimentConfig::selsel_less_equal_int64_t_col_int64
 }
 
 ExperimentConfig::joinFun ExperimentConfig::joinAll() {
-#if CHANGE
+  return &vectorwise::Hashjoin::joinAMAC;
+#if !CHANGE
 #ifdef __AVX512F__
   if (useSimdJoin)  {
     return &vectorwise::Hashjoin::joinAllSIMD;
@@ -100,7 +101,7 @@ ExperimentConfig::joinFun ExperimentConfig::joinAll() {
   }
   return &vectorwise::Hashjoin::joinAllParallel;
 #else
-  return &vectorwise::Hashjoin::joinRow;
+  return &vectorwise::Hashjoin::joinAMAC;
 #endif
 }
 

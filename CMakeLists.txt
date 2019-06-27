@@ -255,12 +255,12 @@ enable_testing()
 set(CTEST_OUTPUT_ON_FAILURE "1")
 
 add_executable(test_all
+  src/test/vectorwise/Operators.cpp
   src/test/tpch_expected.cpp
   src/test/ssb_expected.cpp
   src/test/tpch.cpp
   src/test/ssb.cpp
   src/test/vectorwise/primitives.cpp
-  src/test/vectorwise/Operators.cpp
   src/test/common/Hashmap.cpp
   src/test/common/Database.cpp
   src/test/common/PartitionedDeque.cpp

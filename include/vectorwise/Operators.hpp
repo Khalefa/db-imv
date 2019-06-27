@@ -191,20 +191,33 @@ class Hashjoin : public BinaryOperator {
    struct Shared : public SharedState {
       std::atomic<size_t> found;
       std::atomic<bool> sizeIsSet;
+      std::atomic<bool> printed;
       runtime::Hashmap ht;
-      Shared() : found(0), sizeIsSet(false){};
+      Shared() : found(0), sizeIsSet(false),printed(false){};
    };
-
    struct IteratorContinuation
    /// State to continue iteration in next call
    {
       pos_t nextProbe = 0;
       pos_t numProbes = 0;
+      int probeKey=0;
       runtime::Hashmap::hash_t probeHash;
       runtime::Hashmap::EntryHeader* buildMatch;
       IteratorContinuation()
           : nextProbe(0), numProbes(0), buildMatch(runtime::Hashmap::end()) {}
    } cont;
+/// struct for amac
+   static  const uint8_t stateNum=32;
+   struct AMACState {
+     uint8_t stage;
+     int probeKey=0;
+     pos_t tuple_id=0;
+     runtime::Hashmap::hash_t probeHash;
+     runtime::Hashmap::EntryHeader* buildMatch;
+   }amac_state[stateNum];
+   struct AMACContinuation {
+     int8_t done = 0, k=100;
+   }amac_cont;
 
  private:
    Shared& shared;
