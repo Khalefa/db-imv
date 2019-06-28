@@ -36,6 +36,8 @@ class Hashmap {
    /// contained
    inline EntryHeader* find_chain_tagged(hash_t hash);
    inline Vec8uM find_chain_tagged(Vec8u hashes);
+   inline Vec8uM find_chain_tagged_sel(Vec8u hashes,__mmask8 sel);
+
    /// Insert entry into chain for the given hash
    template <bool concurrentInsert = true>
    inline void insert(EntryHeader* entry, hash_t hash);
@@ -169,6 +171,15 @@ inline Vec8uM Hashmap::find_chain_tagged(Vec8u hashes) {
    __mmask8 matches = filterMatch != Vec8u(uint64_t(0));
    candidates = candidates & Vec8u(maskPointer);
    return {candidates, matches};
+}
+inline Vec8uM Hashmap::find_chain_tagged_sel(Vec8u hashes,__mmask8 sel){
+  auto pos = hashes & Vec8u(mask);
+  Vec8u candidates = _mm512_mask_i64gather_epi64(Vec8u(uint64_t(0)),sel,pos, (const long long int*)entries, 8);
+  Vec8u filterMatch = candidates & tag(hashes);
+  __mmask8 matches = filterMatch != Vec8u(uint64_t(0));
+  matches = matches & sel;
+  candidates = candidates & Vec8u(maskPointer);
+  return {candidates, matches};
 }
 
 template <bool concurrentInsert>

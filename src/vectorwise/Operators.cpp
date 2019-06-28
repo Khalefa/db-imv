@@ -15,7 +15,7 @@
 #include "common/runtime/Hash.hpp"
 
 namespace vectorwise {
-//#define __AVX512F__ 1
+#define __AVX512F__ 1
 using runtime::barrier;
 
 size_t Select::next() {
@@ -112,6 +112,92 @@ size_t ResultWriter::next() {
       currentBlock.addedElements(n);
    }
    return found;
+}
+#define VECTORSIZE 8
+int times=0;
+void printVector(__m512i& vec, std::string str) {
+  if(times>20) return;
+  times++;
+   uint64_t * ptr = (uint64_t*)&vec;
+   std::cout<<str<<"  ";
+   for(int i=0;i<VECTORSIZE;++i) {
+     std::cout<<"vec["<< i <<"]=  "<<ptr[i]<<"    ";
+   }
+   std::cout<<std::endl;
+}
+void gather(__m512i& index, int* probe_keys) {
+  if(times>20) return;
+  uint64_t * ptr = (uint64_t*)&index;
+  std::cout<<"gather keys ";
+  for(int i=0;i<VECTORSIZE;++i) {
+    std::cout<<"vec["<< ptr[i] <<"]=  "<<probe_keys[ptr[i]]<<"    ";
+  }
+  std::cout<<std::endl;
+}
+pos_t Hashjoin::joinFullSIMD(){
+  size_t found=0;
+  int32_t new_add = 0;
+  int* probeKeys = (reinterpret_cast<int*>(((F2_Op *)(probeHash.ops[0].get()))->param1));
+  uint64_t keyOff = ((EqualityCheck*)(keyEquality.ops[0].get()))->offset;
+  __mmask8 m_match = 0,  m_new_probes = -1;
+  __m512i v_base_offset = _mm512_set_epi64(7,6,5,4,3,2,1,0);
+  __m512i v_offset = _mm512_set1_epi64(0),v_new_build_key;
+  __m512i v_base_offset_upper = _mm512_set1_epi64(cont.numProbes);
+  __m512i v_seed= _mm512_set1_epi64(primitives::seed),v_build_key_off = _mm512_set1_epi64(keyOff);
+  __m512i v_probe_hash= _mm512_set1_epi64(0),v_zero=_mm512_set1_epi64(0);
+  __m256i v256_zero= _mm256_set1_epi32(0),v256_probe_keys,v256_build_keys;
+
+  for(;cont.nextProbe < cont.numProbes || SIMDcon->m_valid_probe;) {
+  /// step 1: load the offsets of probing tuples
+    v_offset = _mm512_add_epi64(_mm512_set1_epi64(cont.nextProbe), v_base_offset);
+    SIMDcon->v_probe_offset = _mm512_mask_expand_epi64(SIMDcon->v_probe_offset, _mm512_knot(SIMDcon->m_valid_probe), v_offset);
+    // count the number of empty tuples
+    m_new_probes = _mm512_knot(SIMDcon->m_valid_probe);
+    cont.nextProbe = cont.nextProbe + _mm_popcnt_u32(m_new_probes);
+    SIMDcon->m_valid_probe = _mm512_cmpgt_epu64_mask(v_base_offset_upper, SIMDcon->v_probe_offset);
+    m_new_probes = _mm512_kand(m_new_probes, SIMDcon->m_valid_probe);
+#if 1
+  /// step 2: gather the probe keys
+    v256_probe_keys= _mm512_mask_i64gather_epi32(v256_zero,m_new_probes, SIMDcon->v_probe_offset, (void*)probeKeys, 4);
+    SIMDcon->v_probe_keys=_mm512_mask_blend_epi64(m_new_probes,SIMDcon->v_probe_keys,_mm512_cvtepi32_epi64(v256_probe_keys));
+  /// step 3: compute the hash values of probe keys
+    v_probe_hash = runtime::MurMurHash()(Vec8u(SIMDcon->v_probe_keys),Vec8u(v_seed));
+  /// step 4: find the addresses of corresponding buckets for new probes
+    Vec8uM v_new_bucket_addrs = shared.ht.find_chain_tagged_sel(Vec8u(v_probe_hash),m_new_probes);
+    // the addresses are null, then the corresponding probes are invalid
+    SIMDcon->m_valid_probe = _mm512_kand(_mm512_kor(_mm512_knot(m_new_probes),v_new_bucket_addrs.mask), SIMDcon->m_valid_probe);
+    SIMDcon->v_bucket_addrs =  _mm512_mask_blend_epi64(v_new_bucket_addrs.mask,SIMDcon->v_bucket_addrs,v_new_bucket_addrs.vec);
+  /// step 5: gather the new build keys
+    v256_build_keys= _mm512_mask_i64gather_epi32(v256_zero, SIMDcon->m_valid_probe,
+                            _mm512_add_epi64(SIMDcon->v_bucket_addrs,v_build_key_off),nullptr, 1);
+    SIMDcon->v_build_keys =_mm512_cvtepi32_epi64(v256_build_keys);
+  /// step 6: compare the probe keys and build keys and write points
+    m_match = _mm512_cmpeq_epi64_mask(SIMDcon->v_probe_keys, SIMDcon->v_build_keys);
+    m_match = _mm512_kand(m_match, SIMDcon->m_valid_probe);
+    _mm512_mask_compressstoreu_epi64((buildMatches + found), m_match,SIMDcon->v_bucket_addrs);
+    _mm256_mask_compressstoreu_epi32((probeMatches + found), m_match, _mm512_cvtepi64_epi32(SIMDcon->v_probe_offset));
+#else
+    // fetch the hashes of probing tuples
+    Vec8u v_probe_hash = _mm512_mask_i64gather_epi64(v_zero,SIMDcon->m_valid_probe,SIMDcon->v_probe_offset,(void*)probeHashes,sizeof(runtime::Hashmap::hash_t));
+    Vec8uM entries = shared.ht.find_chain_tagged(v_probe_hash);
+    SIMDcon->v_bucket_addrs = _mm512_mask_blend_epi64(m_new_probes,SIMDcon->v_bucket_addrs,entries.vec);
+    SIMDcon->m_valid_probe= SIMDcon->m_valid_probe&entries.mask;
+    m_match=SIMDcon->m_valid_probe;
+    _mm512_mask_compressstoreu_epi64((buildMatches + found), m_match,SIMDcon->v_bucket_addrs);
+    _mm256_mask_compressstoreu_epi32((probeMatches + found), m_match, _mm512_cvtepi64_epi32(SIMDcon->v_probe_offset));
+    // gather the addresses of building entries
+#endif
+    found+=_mm_popcnt_u32(m_match);
+  /// step 7: move to the next bucket nodes
+    SIMDcon->v_bucket_addrs = _mm512_mask_i64gather_epi64(v_zero,SIMDcon->m_valid_probe, SIMDcon->v_bucket_addrs, nullptr, 1);
+    SIMDcon->m_valid_probe =_mm512_kand(SIMDcon->m_valid_probe,_mm512_cmpneq_epi64_mask(SIMDcon->v_bucket_addrs, v_zero));
+    if(found+VECTORSIZE >= batchSize) {
+      return found;
+    }
+  }
+  SIMDcon->m_valid_probe=0;
+  cont.nextProbe=cont.numProbes;
+  return found;
 }
 pos_t Hashjoin::joinAMAC(){
   size_t found = 0;
@@ -985,31 +1071,55 @@ size_t Hashjoin::next() {
         buildGather.evaluate(n);
         return n;
      }
-   }else {
+   }else if(join == &vectorwise::Hashjoin::joinFullSIMD){
      while (true) {
-        if (cont.nextProbe >= cont.numProbes) {
-          cont.numProbes = right->next();
+        if (cont.nextProbe >= cont.numProbes && SIMDcon->m_valid_probe==0) {
+           cont.numProbes = right->next();
            cont.nextProbe = 0;
+           SIMDcon->reset();
            if (cont.numProbes == EndOfStream) return EndOfStream;
-           probeHash.evaluate(cont.numProbes);
+     //      probeHash.evaluate(cont.numProbes);
         }
         // create join pair vectors with matching hashes (Entry*, pos), where
         // Entry* is for the build side, pos a selection index to the right side
         auto n = (this->*join)();
         // check key equality and remove non equal keys from join result
-       n = keyEquality.evaluate(n);
+     //   n = keyEquality.evaluate(n);
         if (n == 0) continue;
         // materialize build side
         buildGather.evaluate(n);
         return n;
      }
-   }
+
+  }else {
+    while (true) {
+       if (cont.nextProbe >= cont.numProbes) {
+         cont.numProbes = right->next();
+          cont.nextProbe = 0;
+          if (cont.numProbes == EndOfStream) return EndOfStream;
+          probeHash.evaluate(cont.numProbes);
+       }
+       // create join pair vectors with matching hashes (Entry*, pos), where
+       // Entry* is for the build side, pos a selection index to the right side
+       auto n = (this->*join)();
+       // check key equality and remove non equal keys from join result
+      n = keyEquality.evaluate(n);
+       if (n == 0) continue;
+       // materialize build side
+       buildGather.evaluate(n);
+       return n;
+    }
+}
 }
 
-Hashjoin::Hashjoin(Shared& sm) : shared(sm) {}
+Hashjoin::Hashjoin(Shared& sm) : shared(sm) { SIMDcon = new SIMDContinuation();}
 
 Hashjoin::~Hashjoin() {
    // for (auto& block : allocations) free(block.first);
+  if(SIMDcon) {
+    delete SIMDcon;
+    SIMDcon = nullptr;
+  }
 }
 
 HashGroup::HashGroup(Shared& s)

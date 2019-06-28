@@ -14,6 +14,9 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <malloc.h>
+
+using std::make_unique;
 
 namespace vectorwise {
 
@@ -185,7 +188,26 @@ class ResultWriter : public UnaryOperator {
  private:
    runtime::BlockRelation::Block currentBlock;
 };
+////NOTE: the requirement of alignment
+struct __attribute__((aligned(64))) SIMDContinuation {
+  __m512i v_probe_keys;
+  __m512i v_build_keys;
+  __m512i  v_bucket_addrs;
+  __m512i v_probe_offset;
+  __mmask8 m_valid_probe;
+  SIMDContinuation(): v_probe_keys(_mm512_set1_epi64(0)),v_build_keys(_mm512_set1_epi64(0)),
+      v_bucket_addrs(_mm512_set1_epi64(0)),v_probe_offset(_mm512_set1_epi64(0)),m_valid_probe(0){}
+  void reset() {
+       v_probe_keys =_mm512_set1_epi64(0);
+       v_build_keys = _mm512_set1_epi64(0);
+       v_bucket_addrs = _mm512_set1_epi64(0);
+       v_probe_offset = _mm512_set1_epi64(0);
+       m_valid_probe = 0;
+     }
+  void* operator new(size_t size) { return memalign(64,size); }
+  void operator delete(void* mem) { return free(mem); }
 
+};
 class Hashjoin : public BinaryOperator {
  public:
    struct Shared : public SharedState {
@@ -206,6 +228,7 @@ class Hashjoin : public BinaryOperator {
       IteratorContinuation()
           : nextProbe(0), numProbes(0), buildMatch(runtime::Hashmap::end()) {}
    } cont;
+
 /// struct for amac
    static  const uint8_t stateNum=32;
    struct AMACState {
@@ -218,6 +241,8 @@ class Hashjoin : public BinaryOperator {
    struct AMACContinuation {
      int8_t done = 0, k=100;
    }amac_cont;
+
+   SIMDContinuation*  SIMDcon = nullptr;
 
  private:
    Shared& shared;
@@ -276,7 +301,7 @@ class Hashjoin : public BinaryOperator {
    /// similar to join in row
    pos_t joinRow();
    pos_t joinAMAC();
-
+   pos_t joinFullSIMD();
    virtual size_t next() override;
    ~Hashjoin();
 };

@@ -28,8 +28,8 @@ OPTION(HASH_SIZE_32 OFF)
 
 
 # Compiler flags for the different targets
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=skylake-avx512 -g -mtune=native -std=c++14 -fPIC -Wall -Wextra -Wno-psabi  -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -Wall -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=skylake-avx512 -g -mtune=native -std=c++14 -fPIC -w -Wextra -Wno-psabi  -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -w -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
 
 
 if(LINUX)

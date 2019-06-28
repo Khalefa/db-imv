@@ -37,7 +37,9 @@ template <typename CHILD> class Hash {
   inline hash_t operator()(int8_t x, hash_t seed) const {
      return impl()->hashKey(x, seed);
   }
-
+  inline Vec8u operator()(Vec8u x, Vec8u seed) const {
+    return impl()->hashKey(x, seed);
+  }
   /// Pointers
   inline hash_t operator()(void* ptr, hash_t seed) const {
      return impl()->hashKey(reinterpret_cast<uint64_t>(ptr), seed);
@@ -222,13 +224,13 @@ class MurMurHash : public Hash<MurMurHash> {
 
       return h;
    }
-
+#define __AVX512DQ__ 1
   //#ifdef __AVX512F__
 #ifdef __AVX512DQ__
    inline Vec8u hashKey(Vec8u k, Vec8u seed) const {
       // MurmurHash64A
-      const Vec8u m(0xc6a4a7935bd1e995);
-      const Vec8u r(47);
+      const Vec8u m((uint64_t)0xc6a4a7935bd1e995);
+      const Vec8u r((uint64_t)47);
       Vec8u h = seed ^ Vec8u(0x8445d61a4e774912) ^ (Vec8u(8) * m);
       k = k * m;
       k = k ^ (k >> r);
