@@ -57,10 +57,12 @@ class Hashmap {
    inline void clear();
 
    std::atomic<EntryHeader*>* entries = nullptr;
-   inline void prefetchEntry(hash_t hash) {
-     if(entries!= nullptr)
-     _mm_prefetch(((char*)(entries+hash)),_MM_HINT_T0);
-   }
+  inline void prefetchEntry(__m512i& hash) {
+    uint64_t* ptr = (uint64_t*)&hash;
+    for (int i = 0; i < 8; ++i) {
+      _mm_prefetch(((char* )(entries + ptr[i])), _MM_HINT_T0);
+    }
+  }
    hash_t mask;
    using ptr_t = uint64_t;
    const ptr_t maskPointer = (~(ptr_t)0) >> (16);

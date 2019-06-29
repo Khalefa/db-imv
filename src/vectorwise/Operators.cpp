@@ -134,21 +134,244 @@ void gather(__m512i& index, int* probe_keys) {
   }
   std::cout<<std::endl;
 }
-pos_t Hashjoin::joinFullSIMD(){
+pos_t Hashjoin::joinSIMDAMAC() {
   size_t found=0;
-  int32_t new_add = 0;
+  if(imv_cont.k==100) {
+    for(int i=0;i<imvNum;++i) {
+      imv_state[i]->reset();
+    }
+    imv_cont.k=0;
+    imv_cont.done=0;
+  }
   int* probeKeys = (reinterpret_cast<int*>(((F2_Op *)(probeHash.ops[0].get()))->param1));
   uint64_t keyOff = ((EqualityCheck*)(keyEquality.ops[0].get()))->offset;
   __mmask8 m_match = 0,  m_new_probes = -1;
   __m512i v_base_offset = _mm512_set_epi64(7,6,5,4,3,2,1,0);
-  __m512i v_offset = _mm512_set1_epi64(0),v_new_build_key;
+  __m512i v_offset = _mm512_set1_epi64(0),v_new_build_key,v_build_keys;
   __m512i v_base_offset_upper = _mm512_set1_epi64(cont.numProbes);
   __m512i v_seed= _mm512_set1_epi64(primitives::seed),v_build_key_off = _mm512_set1_epi64(keyOff);
   __m512i v_probe_hash= _mm512_set1_epi64(0),v_zero=_mm512_set1_epi64(0);
   __m256i v256_zero= _mm256_set1_epi32(0),v256_probe_keys,v256_build_keys;
 
-  for(;cont.nextProbe < cont.numProbes || SIMDcon->m_valid_probe;) {
-  /// step 1: load the offsets of probing tuples
+  while(imv_cont.done<imvNum) {
+    imv_cont.k = (imv_cont.k>=imvNum)? 0 :imv_cont.k;
+    if(cont.nextProbe >= cont.numProbes) {
+      if(imv_state[imv_cont.k]->m_valid_probe==0 && imv_state[imv_cont.k]->stage!=3) {
+        ++imv_cont.done;
+        imv_state[imv_cont.k]->stage = 3;
+        ++imv_cont.k;
+        continue;
+      }
+    }
+    switch(imv_state[imv_cont.k]->stage) {
+      case 1: {
+        /// step 1: load the offsets of probing tuples
+          v_offset = _mm512_add_epi64(_mm512_set1_epi64(cont.nextProbe), v_base_offset);
+          imv_state[imv_cont.k]->v_probe_offset = _mm512_mask_expand_epi64(imv_state[imv_cont.k]->v_probe_offset, _mm512_knot(imv_state[imv_cont.k]->m_valid_probe), v_offset);
+          // count the number of empty tuples
+          m_new_probes = _mm512_knot(imv_state[imv_cont.k]->m_valid_probe);
+          cont.nextProbe = cont.nextProbe + _mm_popcnt_u32(m_new_probes);
+          imv_state[imv_cont.k]->m_valid_probe = _mm512_cmpgt_epu64_mask(v_base_offset_upper, imv_state[imv_cont.k]->v_probe_offset);
+          m_new_probes = _mm512_kand(m_new_probes, imv_state[imv_cont.k]->m_valid_probe);
+        /// step 2: gather the probe keys
+          v256_probe_keys= _mm512_mask_i64gather_epi32(v256_zero,m_new_probes, imv_state[imv_cont.k]->v_probe_offset, (void*)probeKeys, 4);
+          imv_state[imv_cont.k]->v_probe_keys=_mm512_mask_blend_epi64(m_new_probes,imv_state[imv_cont.k]->v_probe_keys,_mm512_cvtepi32_epi64(v256_probe_keys));
+        /// step 3: compute the hash values of probe keys
+          v_probe_hash = runtime::MurMurHash()((imv_state[imv_cont.k]->v_probe_keys),(v_seed));
+        /// step 4: find the addresses of corresponding buckets for new probes
+          Vec8uM v_new_bucket_addrs = shared.ht.find_chain_tagged_sel((v_probe_hash),m_new_probes);
+          // the addresses are null, then the corresponding probes are invalid
+          imv_state[imv_cont.k]->m_valid_probe = _mm512_kand(_mm512_kor(_mm512_knot(m_new_probes),v_new_bucket_addrs.mask), imv_state[imv_cont.k]->m_valid_probe);
+          imv_state[imv_cont.k]->v_bucket_addrs =  _mm512_mask_blend_epi64(v_new_bucket_addrs.mask,imv_state[imv_cont.k]->v_bucket_addrs,v_new_bucket_addrs.vec);
+          imv_state[imv_cont.k]->stage = 0;
+          uint64_t * ht_pos = (uint64_t *)&imv_state[imv_cont.k]->v_bucket_addrs;
+          for (int i = 0; i < VECTORSIZE; ++i) {
+            _mm_prefetch((char *)(ht_pos[i]), _MM_HINT_T0);
+            _mm_prefetch(((char *)(ht_pos[i])+64), _MM_HINT_T0);
+          }
+      }break;
+      case 0: {
+        /// step 5: gather the all new build keys
+          v256_build_keys= _mm512_mask_i64gather_epi32(v256_zero, imv_state[imv_cont.k]->m_valid_probe,
+                                  _mm512_add_epi64(imv_state[imv_cont.k]->v_bucket_addrs,v_build_key_off),nullptr, 1);
+          v_build_keys =_mm512_cvtepi32_epi64(v256_build_keys);
+        /// step 6: compare the probe keys and build keys and write points
+          m_match = _mm512_cmpeq_epi64_mask(imv_state[imv_cont.k]->v_probe_keys, v_build_keys);
+          m_match = _mm512_kand(m_match, imv_state[imv_cont.k]->m_valid_probe);
+          _mm512_mask_compressstoreu_epi64((buildMatches + found), m_match,imv_state[imv_cont.k]->v_bucket_addrs);
+          _mm256_mask_compressstoreu_epi32((probeMatches + found), m_match, _mm512_cvtepi64_epi32(imv_state[imv_cont.k]->v_probe_offset));
+
+          found+=_mm_popcnt_u32(m_match);
+        /// step 7: move to the next bucket nodes
+          imv_state[imv_cont.k]->v_bucket_addrs = _mm512_mask_i64gather_epi64(v_zero,imv_state[imv_cont.k]->m_valid_probe, imv_state[imv_cont.k]->v_bucket_addrs, nullptr, 1);
+          imv_state[imv_cont.k]->m_valid_probe =_mm512_kand(imv_state[imv_cont.k]->m_valid_probe,_mm512_cmpneq_epi64_mask(imv_state[imv_cont.k]->v_bucket_addrs, v_zero));
+          imv_state[imv_cont.k]->stage = 1;
+          if(found+VECTORSIZE >= batchSize) {
+            return found;
+          }
+      }break;
+    }
+    ++imv_cont.k;
+  }
+  imv_cont.k=100;
+  return found;
+}
+inline void compress(IMVState* state) {
+  state->v_bucket_addrs = _mm512_maskz_compress_epi64(state->m_valid_probe, state->v_bucket_addrs);
+  state->v_probe_keys = _mm512_maskz_compress_epi64(state->m_valid_probe, state->v_probe_keys);
+  state->v_probe_offset = _mm512_maskz_compress_epi64(state->m_valid_probe, state->v_probe_offset);
+}
+inline void expand(IMVState* src_state, IMVState* dest_state) {
+  dest_state->v_bucket_addrs = _mm512_mask_expand_epi64(dest_state->v_bucket_addrs, _mm512_knot(dest_state->m_valid_probe), src_state->v_bucket_addrs);
+  dest_state->v_probe_keys = _mm512_mask_expand_epi64(dest_state->v_probe_keys, _mm512_knot(dest_state->m_valid_probe), src_state->v_probe_keys);
+  dest_state->v_probe_offset = _mm512_mask_expand_epi64(dest_state->v_probe_offset, _mm512_knot(dest_state->m_valid_probe), src_state->v_probe_offset);
+
+}
+pos_t Hashjoin::joinIMV() {
+  size_t found = 0;
+  if (imv_cont.k == 100) {
+    for (int i = 0; i <= imvNum; ++i) {
+      imv_state[i]->reset();
+    }
+    imv_cont.k = 0;
+    imv_cont.done = 0;
+  }
+  int* probeKeys = (reinterpret_cast<int*>(((F2_Op *) (probeHash.ops[0].get()))->param1));
+  uint64_t keyOff = ((EqualityCheck*) (keyEquality.ops[0].get()))->offset;
+  __attribute__((aligned(64)))  __mmask8 m_match = 0, m_new_probes = -1, mask[VECTORSIZE + 1];
+
+  __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0);
+  __m512i v_offset = _mm512_set1_epi64(0), v_new_build_key, v_build_keys;
+  __m512i v_base_offset_upper = _mm512_set1_epi64(cont.numProbes);
+  __m512i v_seed = _mm512_set1_epi64(primitives::seed), v_build_key_off = _mm512_set1_epi64(keyOff);
+  __m512i  v_zero = _mm512_set1_epi64(0);
+  __m256i v256_zero = _mm256_set1_epi32(0), v256_probe_keys, v256_build_keys;
+  uint64_t * ht_pos = nullptr;
+  uint8_t num, num_temp;
+  for (int i = 0; i <= VECTORSIZE; ++i) {
+    mask[i] = (1 << i) - 1;
+  }
+  while (true) {
+    imv_cont.k = (imv_cont.k >= imvNum) ? 0 : imv_cont.k;
+    if (cont.nextProbe >= cont.numProbes) {
+      if (imv_state[imv_cont.k]->m_valid_probe == 0 && imv_state[imv_cont.k]->stage != 3) {
+        ++imv_cont.done;
+        imv_state[imv_cont.k]->stage = 3;
+        ++imv_cont.k;
+        continue;
+      }
+    }
+    if (imv_cont.done >= imvNum) {
+      if (imv_state[imvNum]->m_valid_probe > 0) {
+        imv_cont.k = imvNum;
+        imv_state[imvNum]->stage = 0;
+      } else {
+        break;
+      }
+    }
+    switch (imv_state[imv_cont.k]->stage) {
+      case 1: {
+        /// step 1: load the offsets of probing tuples
+        imv_state[imv_cont.k]->v_probe_offset = _mm512_add_epi64(_mm512_set1_epi64(cont.nextProbe), v_base_offset);
+        cont.nextProbe += VECTORSIZE;
+        imv_state[imv_cont.k]->m_valid_probe = _mm512_cmpgt_epu64_mask(v_base_offset_upper, imv_state[imv_cont.k]->v_probe_offset);
+        /// step 2: gather the probe keys
+        v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, imv_state[imv_cont.k]->m_valid_probe, imv_state[imv_cont.k]->v_probe_offset, (void* )probeKeys, 4);
+        imv_state[imv_cont.k]->v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
+        /// step 3: compute the hash values of probe keys
+        imv_state[imv_cont.k]->v_probe_hash = runtime::MurMurHash()((imv_state[imv_cont.k]->v_probe_keys), (v_seed));
+        imv_state[imv_cont.k]->stage = 2;
+        shared.ht.prefetchEntry((imv_state[imv_cont.k]->v_probe_hash));
+      }break;
+      case 2:{
+        /// step 4: find the addresses of corresponding buckets for new probes
+        Vec8uM v_new_bucket_addrs = shared.ht.find_chain_tagged((imv_state[imv_cont.k]->v_probe_hash));
+        imv_state[imv_cont.k]->m_valid_probe = _mm512_kand(imv_state[imv_cont.k]->m_valid_probe, v_new_bucket_addrs.mask);
+        imv_state[imv_cont.k]->v_bucket_addrs = v_new_bucket_addrs.vec;
+        imv_state[imv_cont.k]->stage = 0;
+        ht_pos = (uint64_t *) &imv_state[imv_cont.k]->v_bucket_addrs;
+        for (int i = 0; i < VECTORSIZE; ++i) {
+          _mm_prefetch((char * )(ht_pos[i]), _MM_HINT_T0);
+          _mm_prefetch(((char * )(ht_pos[i]) + 64), _MM_HINT_T0);
+
+        }
+      }
+        break;
+      case 0: {
+        /// step 5: gather the all new build keys
+        v256_build_keys = _mm512_mask_i64gather_epi32(v256_zero, imv_state[imv_cont.k]->m_valid_probe, _mm512_add_epi64(imv_state[imv_cont.k]->v_bucket_addrs, v_build_key_off), nullptr, 1);
+        v_build_keys = _mm512_cvtepi32_epi64(v256_build_keys);
+        /// step 6: compare the probe keys and build keys and write points
+        m_match = _mm512_cmpeq_epi64_mask(imv_state[imv_cont.k]->v_probe_keys, v_build_keys);
+        m_match = _mm512_kand(m_match, imv_state[imv_cont.k]->m_valid_probe);
+        _mm512_mask_compressstoreu_epi64((buildMatches + found), m_match, imv_state[imv_cont.k]->v_bucket_addrs);
+        _mm256_mask_compressstoreu_epi32((probeMatches + found), m_match, _mm512_cvtepi64_epi32(imv_state[imv_cont.k]->v_probe_offset));
+
+        found += _mm_popcnt_u32(m_match);
+        /// step 7: move to the next bucket nodes
+        imv_state[imv_cont.k]->v_bucket_addrs = _mm512_mask_i64gather_epi64(v_zero, imv_state[imv_cont.k]->m_valid_probe, imv_state[imv_cont.k]->v_bucket_addrs, nullptr, 1);
+        imv_state[imv_cont.k]->m_valid_probe = _mm512_kand(imv_state[imv_cont.k]->m_valid_probe, _mm512_cmpneq_epi64_mask(imv_state[imv_cont.k]->v_bucket_addrs, v_zero));
+
+        num = _mm_popcnt_u32(imv_state[imv_cont.k]->m_valid_probe);
+        if (num == VECTORSIZE) {
+          ht_pos = (uint64_t *) &imv_state[imv_cont.k]->v_bucket_addrs;
+          for (int i = 0; i < VECTORSIZE; ++i) {
+            _mm_prefetch((char * )(ht_pos[i]), _MM_HINT_T0);
+            _mm_prefetch(((char * )(ht_pos[i]) + 64), _MM_HINT_T0);
+          }
+        } else {
+          if (imv_cont.done < imvNum) {
+            num_temp = _mm_popcnt_u32(imv_state[imvNum]->m_valid_probe);
+            if (num + num_temp < VECTORSIZE) {
+              // compress imv_state[imv_cont.k]
+              compress(imv_state[imv_cont.k]);
+              // expand imv_state[imv_cont.k] -> imv_state[imvNum]
+              expand(imv_state[imv_cont.k],imv_state[imvNum]);
+              imv_state[imvNum]->m_valid_probe = mask[num + num_temp];
+              imv_state[imv_cont.k]->m_valid_probe = 0;
+              imv_state[imv_cont.k]->stage = 1;
+            } else {
+              // expand imv_state[imvNum] -> expand imv_state[imv_cont.k]
+              expand(imv_state[imvNum],imv_state[imv_cont.k]);
+              imv_state[imvNum]->m_valid_probe = _mm512_kand(imv_state[imvNum]->m_valid_probe, _mm512_knot(mask[VECTORSIZE - num]));
+              // compress imv_state[imvNum]
+              compress(imv_state[imvNum]);
+              imv_state[imvNum]->m_valid_probe = imv_state[imvNum]->m_valid_probe >> (VECTORSIZE - num);
+              imv_state[imv_cont.k]->m_valid_probe = mask[VECTORSIZE];
+              imv_state[imv_cont.k]->stage = 0;
+              ht_pos = (uint64_t *) &imv_state[imv_cont.k]->v_bucket_addrs;
+              for (int i = 0; i < VECTORSIZE; ++i) {
+                _mm_prefetch((char * )(ht_pos[i]), _MM_HINT_T0);
+                _mm_prefetch(((char * )(ht_pos[i]) + 64), _MM_HINT_T0);
+              }
+            }
+          }
+        }
+        if (found + VECTORSIZE >= batchSize) {
+          return found;
+        }
+      }
+        break;
+    }
+    ++imv_cont.k;
+  }
+  imv_cont.k = 100;
+  return found;
+}
+pos_t Hashjoin::joinFullSIMD() {
+  size_t found = 0;
+  int* probeKeys = (reinterpret_cast<int*>(((F2_Op *) (probeHash.ops[0].get()))->param1));
+  uint64_t keyOff = ((EqualityCheck*) (keyEquality.ops[0].get()))->offset;
+  __mmask8 m_match = 0, m_new_probes = -1;
+  __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0);
+  __m512i v_offset = _mm512_set1_epi64(0), v_new_build_key, v_build_keys;
+  __m512i v_base_offset_upper = _mm512_set1_epi64(cont.numProbes);
+  __m512i v_seed = _mm512_set1_epi64(primitives::seed), v_build_key_off = _mm512_set1_epi64(keyOff);
+  __m512i v_probe_hash = _mm512_set1_epi64(0), v_zero = _mm512_set1_epi64(0);
+  __m256i v256_zero = _mm256_set1_epi32(0), v256_probe_keys, v256_build_keys;
+
+  for (; cont.nextProbe < cont.numProbes || SIMDcon->m_valid_probe;) {
+    /// step 1: load the offsets of probing tuples
     v_offset = _mm512_add_epi64(_mm512_set1_epi64(cont.nextProbe), v_base_offset);
     SIMDcon->v_probe_offset = _mm512_mask_expand_epi64(SIMDcon->v_probe_offset, _mm512_knot(SIMDcon->m_valid_probe), v_offset);
     // count the number of empty tuples
@@ -157,26 +380,26 @@ pos_t Hashjoin::joinFullSIMD(){
     SIMDcon->m_valid_probe = _mm512_cmpgt_epu64_mask(v_base_offset_upper, SIMDcon->v_probe_offset);
     m_new_probes = _mm512_kand(m_new_probes, SIMDcon->m_valid_probe);
 #if 1
-  /// step 2: gather the probe keys
-    v256_probe_keys= _mm512_mask_i64gather_epi32(v256_zero,m_new_probes, SIMDcon->v_probe_offset, (void*)probeKeys, 4);
-    SIMDcon->v_probe_keys=_mm512_mask_blend_epi64(m_new_probes,SIMDcon->v_probe_keys,_mm512_cvtepi32_epi64(v256_probe_keys));
-  /// step 3: compute the hash values of probe keys
-    v_probe_hash = runtime::MurMurHash()(Vec8u(SIMDcon->v_probe_keys),Vec8u(v_seed));
-  /// step 4: find the addresses of corresponding buckets for new probes
-    Vec8uM v_new_bucket_addrs = shared.ht.find_chain_tagged_sel(Vec8u(v_probe_hash),m_new_probes);
+    /// step 2: gather the probe keys
+    v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, m_new_probes, SIMDcon->v_probe_offset, (void* )probeKeys, 4);
+    SIMDcon->v_probe_keys = _mm512_mask_blend_epi64(m_new_probes, SIMDcon->v_probe_keys, _mm512_cvtepi32_epi64(v256_probe_keys));
+    /// step 3: compute the hash values of probe keys
+    v_probe_hash = runtime::MurMurHash()((SIMDcon->v_probe_keys), (v_seed));
+    /// step 4: find the addresses of corresponding buckets for new probes
+    Vec8uM v_new_bucket_addrs = shared.ht.find_chain_tagged_sel((v_probe_hash), m_new_probes);
     // the addresses are null, then the corresponding probes are invalid
-    SIMDcon->m_valid_probe = _mm512_kand(_mm512_kor(_mm512_knot(m_new_probes),v_new_bucket_addrs.mask), SIMDcon->m_valid_probe);
-    SIMDcon->v_bucket_addrs =  _mm512_mask_blend_epi64(v_new_bucket_addrs.mask,SIMDcon->v_bucket_addrs,v_new_bucket_addrs.vec);
-  /// step 5: gather the new build keys
-    v256_build_keys= _mm512_mask_i64gather_epi32(v256_zero, SIMDcon->m_valid_probe,
-                            _mm512_add_epi64(SIMDcon->v_bucket_addrs,v_build_key_off),nullptr, 1);
-    SIMDcon->v_build_keys =_mm512_cvtepi32_epi64(v256_build_keys);
-  /// step 6: compare the probe keys and build keys and write points
-    m_match = _mm512_cmpeq_epi64_mask(SIMDcon->v_probe_keys, SIMDcon->v_build_keys);
+    SIMDcon->m_valid_probe = _mm512_kand(_mm512_kor(_mm512_knot(m_new_probes), v_new_bucket_addrs.mask), SIMDcon->m_valid_probe);
+    SIMDcon->v_bucket_addrs = _mm512_mask_blend_epi64(v_new_bucket_addrs.mask, SIMDcon->v_bucket_addrs, v_new_bucket_addrs.vec);
+    /// step 5: gather the all new build keys
+    v256_build_keys = _mm512_mask_i64gather_epi32(v256_zero, SIMDcon->m_valid_probe, _mm512_add_epi64(SIMDcon->v_bucket_addrs, v_build_key_off), nullptr, 1);
+    v_build_keys = _mm512_cvtepi32_epi64(v256_build_keys);
+    /// step 6: compare the probe keys and build keys and write points
+    m_match = _mm512_cmpeq_epi64_mask(SIMDcon->v_probe_keys, v_build_keys);
     m_match = _mm512_kand(m_match, SIMDcon->m_valid_probe);
-    _mm512_mask_compressstoreu_epi64((buildMatches + found), m_match,SIMDcon->v_bucket_addrs);
+    _mm512_mask_compressstoreu_epi64((buildMatches + found), m_match, SIMDcon->v_bucket_addrs);
     _mm256_mask_compressstoreu_epi32((probeMatches + found), m_match, _mm512_cvtepi64_epi32(SIMDcon->v_probe_offset));
 #else
+    // just write the pair(buildEntries, probeOffset), note to open the probeHashes and Equality
     // fetch the hashes of probing tuples
     Vec8u v_probe_hash = _mm512_mask_i64gather_epi64(v_zero,SIMDcon->m_valid_probe,SIMDcon->v_probe_offset,(void*)probeHashes,sizeof(runtime::Hashmap::hash_t));
     Vec8uM entries = shared.ht.find_chain_tagged(v_probe_hash);
@@ -187,39 +410,39 @@ pos_t Hashjoin::joinFullSIMD(){
     _mm256_mask_compressstoreu_epi32((probeMatches + found), m_match, _mm512_cvtepi64_epi32(SIMDcon->v_probe_offset));
     // gather the addresses of building entries
 #endif
-    found+=_mm_popcnt_u32(m_match);
-  /// step 7: move to the next bucket nodes
-    SIMDcon->v_bucket_addrs = _mm512_mask_i64gather_epi64(v_zero,SIMDcon->m_valid_probe, SIMDcon->v_bucket_addrs, nullptr, 1);
-    SIMDcon->m_valid_probe =_mm512_kand(SIMDcon->m_valid_probe,_mm512_cmpneq_epi64_mask(SIMDcon->v_bucket_addrs, v_zero));
-    if(found+VECTORSIZE >= batchSize) {
+    found += _mm_popcnt_u32(m_match);
+    /// step 7: move to the next bucket nodes
+    SIMDcon->v_bucket_addrs = _mm512_mask_i64gather_epi64(v_zero, SIMDcon->m_valid_probe, SIMDcon->v_bucket_addrs, nullptr, 1);
+    SIMDcon->m_valid_probe = _mm512_kand(SIMDcon->m_valid_probe, _mm512_cmpneq_epi64_mask(SIMDcon->v_bucket_addrs, v_zero));
+    if (found + VECTORSIZE >= batchSize) {
       return found;
     }
   }
-  SIMDcon->m_valid_probe=0;
-  cont.nextProbe=cont.numProbes;
+  SIMDcon->m_valid_probe = 0;
+  cont.nextProbe = cont.numProbes;
   return found;
 }
-pos_t Hashjoin::joinAMAC(){
+pos_t Hashjoin::joinAMAC() {
   size_t found = 0;
   // initialization
-  if(amac_cont.k==100) {
-    for(int i=0;i<stateNum;++i) {
-      amac_state[i].stage=1;
+  if (amac_cont.k == 100) {
+    for (int i = 0; i < stateNum; ++i) {
+      amac_state[i].stage = 1;
     }
-    amac_cont.done=0;
-    amac_cont.k=0;
+    amac_cont.done = 0;
+    amac_cont.k = 0;
   }
-  auto probeKeys = (reinterpret_cast<int*>(((F2_Op *)(probeHash.ops[0].get()))->param1));
-  auto keyOff = ((EqualityCheck*)(keyEquality.ops[0].get()))->offset;
-  while(amac_cont.done < stateNum) {
-    amac_cont.k = (amac_cont.k >= stateNum)? 0: amac_cont.k;
-    switch(amac_state[amac_cont.k].stage) {
+  auto probeKeys = (reinterpret_cast<int*>(((F2_Op *) (probeHash.ops[0].get()))->param1));
+  auto keyOff = ((EqualityCheck*) (keyEquality.ops[0].get()))->offset;
+  while (amac_cont.done < stateNum) {
+    amac_cont.k = (amac_cont.k >= stateNum) ? 0 : amac_cont.k;
+    switch (amac_state[amac_cont.k].stage) {
 #if 0
       case 1: {
         if(cont.nextProbe>=cont.numProbes) {
           ++amac_cont.done;
           amac_state[amac_cont.k].stage=3;
-       //   std::cout<<"amac done one "<<cont.numProbes<<" , "<<cont.nextProbe<<std::endl;
+          //   std::cout<<"amac done one "<<cont.numProbes<<" , "<<cont.nextProbe<<std::endl;
           break;
         }
         cont.probeKey =probeKeys[cont.nextProbe];
@@ -241,102 +464,104 @@ pos_t Hashjoin::joinAMAC(){
       }break;
 #else
       case 1: {
-        if(cont.nextProbe>=cont.numProbes) {
+        if (cont.nextProbe >= cont.numProbes) {
           ++amac_cont.done;
-          amac_state[amac_cont.k].stage=3;
-       //   std::cout<<"amac done one "<<cont.numProbes<<" , "<<cont.nextProbe<<std::endl;
+          amac_state[amac_cont.k].stage = 3;
+          //   std::cout<<"amac done one "<<cont.numProbes<<" , "<<cont.nextProbe<<std::endl;
           break;
         }
-        cont.probeKey =probeKeys[cont.nextProbe];
-        cont.probeHash =(runtime::MurMurHash()(cont.probeKey,primitives::seed));
+        cont.probeKey = probeKeys[cont.nextProbe];
+        cont.probeHash = (runtime::MurMurHash()(cont.probeKey, primitives::seed));
         amac_state[amac_cont.k].tuple_id = cont.nextProbe;
         ++cont.nextProbe;
-        amac_state[amac_cont.k].probeKey=cont.probeKey;
+        amac_state[amac_cont.k].probeKey = cont.probeKey;
         amac_state[amac_cont.k].probeHash = cont.probeHash;
-        _mm_prefetch((char *)(shared.ht.entries+cont.probeHash), _MM_HINT_T0);
-        amac_state[amac_cont.k].stage=2;
-      }break;
+        _mm_prefetch((char * )(shared.ht.entries + cont.probeHash), _MM_HINT_T0);
+        amac_state[amac_cont.k].stage = 2;
+      }
+        break;
       case 2: {
-        amac_state[amac_cont.k].buildMatch=shared.ht.find_chain_tagged(amac_state[amac_cont.k].probeHash);
-        if(nullptr==amac_state[amac_cont.k].buildMatch) {
-          amac_state[amac_cont.k].stage=1;
+        amac_state[amac_cont.k].buildMatch = shared.ht.find_chain_tagged(amac_state[amac_cont.k].probeHash);
+        if (nullptr == amac_state[amac_cont.k].buildMatch) {
+          amac_state[amac_cont.k].stage = 1;
           --amac_cont.k;
-        }else {
-          _mm_prefetch((char *)(amac_state[amac_cont.k].buildMatch), _MM_HINT_T0);
-          _mm_prefetch((char *)(amac_state[amac_cont.k].buildMatch)+64, _MM_HINT_T0);
-          amac_state[amac_cont.k].stage=0;
+        } else {
+          _mm_prefetch((char * )(amac_state[amac_cont.k].buildMatch), _MM_HINT_T0);
+          _mm_prefetch((char * )(amac_state[amac_cont.k].buildMatch) + 64, _MM_HINT_T0);
+          amac_state[amac_cont.k].stage = 0;
         }
-      }break;
+      }
+        break;
 #endif
       case 0: {
         auto entry = amac_state[amac_cont.k].buildMatch;
-        if(nullptr==entry) {
-          amac_state[amac_cont.k].stage=1;
+        if (nullptr == entry) {
+          amac_state[amac_cont.k].stage = 1;
           --amac_cont.k;
           break;
-        }else {
-          auto buildkey = *((addBytes((reinterpret_cast<int*>(entry)),keyOff)));
-           if ((buildkey==amac_state[amac_cont.k].probeKey)) {
-                buildMatches[found] = entry;
-                probeMatches[found++] = amac_state[amac_cont.k].tuple_id;
-           }
-           entry= entry->next;
-           if(nullptr == entry) {
-               amac_state[amac_cont.k].stage=1;
-               --amac_cont.k;
-           }else {
-               amac_state[amac_cont.k].buildMatch = entry;
-               _mm_prefetch((char *)(entry), _MM_HINT_T0);
-               _mm_prefetch((char *)(entry)+64, _MM_HINT_T0);
-           }
-           if (found == batchSize) {
-              return batchSize;
-           }
+        } else {
+          auto buildkey = *((addBytes((reinterpret_cast<int*>(entry)), keyOff)));
+          if ((buildkey == amac_state[amac_cont.k].probeKey)) {
+            buildMatches[found] = entry;
+            probeMatches[found++] = amac_state[amac_cont.k].tuple_id;
+          }
+          entry = entry->next;
+          if (nullptr == entry) {
+            amac_state[amac_cont.k].stage = 1;
+            --amac_cont.k;
+          } else {
+            amac_state[amac_cont.k].buildMatch = entry;
+            _mm_prefetch((char * )(entry), _MM_HINT_T0);
+            _mm_prefetch((char * )(entry) + 64, _MM_HINT_T0);
+          }
+          if (found == batchSize) {
+            return batchSize;
+          }
         }
-      }break;
+      }
+        break;
     }
     ++amac_cont.k;
   }
-  amac_cont.k=100;
-  cont.buildMatch = shared.ht.end();
-  cont.nextProbe = cont.numProbes;
+  amac_cont.k = 100;
   return found;
 }
 // Note the way to get buildKey and probeKey: multi-joinkey or selective vectors
-pos_t Hashjoin::joinRow(){
- // std::cout<<"use join row "<<std::endl;
+pos_t Hashjoin::joinRow() {
+  // std::cout<<"use join row "<<std::endl;
   size_t found = 0;
   do {
-    for (auto entry = cont.buildMatch; entry != shared.ht.end();entry = entry->next) {
-      auto buildkey = *((addBytes((reinterpret_cast<int*>(entry)),((EqualityCheck*)(keyEquality.ops[0].get()))->offset)));
-      if ((buildkey==cont.probeKey)) {
+    for (auto entry = cont.buildMatch; entry != shared.ht.end(); entry = entry->next) {
+      auto buildkey = *((addBytes((reinterpret_cast<int*>(entry)), ((EqualityCheck*) (keyEquality.ops[0].get()))->offset)));
+      if ((buildkey == cont.probeKey)) {
 //      if (entry->hash == cont.probeHash) {
-          buildMatches[found] = entry;
-          probeMatches[found++] = cont.nextProbe;
-          if (found == batchSize) {
-             // output buffers are full, save state for continuation
-             cont.buildMatch = entry->next;
-             if(cont.buildMatch == shared.ht.end()) {
-               ++cont.nextProbe;
-             }
-             return batchSize;
-         }
-       }
+        buildMatches[found] = entry;
+        probeMatches[found++] = cont.nextProbe;
+        if (found == batchSize) {
+          // output buffers are full, save state for continuation
+          cont.buildMatch = entry->next;
+          if (cont.buildMatch == shared.ht.end()) {
+            ++cont.nextProbe;
+          }
+          return batchSize;
+        }
+      }
     }
-    if (cont.buildMatch != shared.ht.end()) ++cont.nextProbe;
+    if (cont.buildMatch != shared.ht.end())
+      ++cont.nextProbe;
 
-    if(cont.nextProbe < cont.numProbes) {
+    if (cont.nextProbe < cont.numProbes) {
 //      cont.probeHash = probeHashes[cont.nextProbe];
-      cont.probeKey =(reinterpret_cast<int*>(((F2_Op *)(probeHash.ops[0].get()))->param1))[cont.nextProbe];
-      cont.probeHash =runtime::MurMurHash()(cont.probeKey,primitives::seed);
+      cont.probeKey = (reinterpret_cast<int*>(((F2_Op *) (probeHash.ops[0].get()))->param1))[cont.nextProbe];
+      cont.probeHash = runtime::MurMurHash()(cont.probeKey, primitives::seed);
       cont.buildMatch = shared.ht.find_chain_tagged(cont.probeHash);
-      if(cont.buildMatch == shared.ht.end()) {
+      if (cont.buildMatch == shared.ht.end()) {
         ++cont.nextProbe;
       }
-    }else {
+    } else {
       break;
     }
-  }while(true);
+  } while (true);
   cont.buildMatch = shared.ht.end();
   cont.nextProbe = cont.numProbes;
   return found;
@@ -1060,7 +1285,6 @@ size_t Hashjoin::next() {
        if(amac_cont.k==100) {
           cont.numProbes = right->next();
            cont.nextProbe = 0;
-           amac_cont.k=100;
            if (cont.numProbes == EndOfStream) return EndOfStream;
         }
         // create join pair vectors with matching hashes (Entry*, pos), where
@@ -1091,7 +1315,26 @@ size_t Hashjoin::next() {
         return n;
      }
 
-  }else {
+  }else if(join == &vectorwise::Hashjoin::joinSIMDAMAC || join ==&vectorwise::Hashjoin::joinIMV ){
+    while (true) {
+       if (imv_cont.k==100) {
+          cont.numProbes = right->next();
+          cont.nextProbe = 0;
+          if (cont.numProbes == EndOfStream) return EndOfStream;
+    //      probeHash.evaluate(cont.numProbes);
+       }
+       // create join pair vectors with matching hashes (Entry*, pos), where
+       // Entry* is for the build side, pos a selection index to the right side
+       auto n = (this->*join)();
+       // check key equality and remove non equal keys from join result
+    //   n = keyEquality.evaluate(n);
+       if (n == 0) continue;
+       // materialize build side
+       buildGather.evaluate(n);
+       return n;
+    }
+
+ }else {
     while (true) {
        if (cont.nextProbe >= cont.numProbes) {
          cont.numProbes = right->next();
@@ -1109,10 +1352,14 @@ size_t Hashjoin::next() {
        buildGather.evaluate(n);
        return n;
     }
-}
+ }
 }
 
-Hashjoin::Hashjoin(Shared& sm) : shared(sm) { SIMDcon = new SIMDContinuation();}
+Hashjoin::Hashjoin(Shared& sm) : shared(sm) { SIMDcon = new SIMDContinuation();
+
+  for(int i=0;i<=imvNum;++i)
+  imv_state[i] = new IMVState();
+}
 
 Hashjoin::~Hashjoin() {
    // for (auto& block : allocations) free(block.first);
@@ -1120,6 +1367,12 @@ Hashjoin::~Hashjoin() {
     delete SIMDcon;
     SIMDcon = nullptr;
   }
+  for(int i=0;i<=imvNum;++i){
+    if(imv_state[i]) {
+      delete imv_state[i];
+      imv_state[i] = nullptr;
+      }
+   }
 }
 
 HashGroup::HashGroup(Shared& s)

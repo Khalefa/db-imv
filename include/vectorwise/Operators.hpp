@@ -191,18 +191,35 @@ class ResultWriter : public UnaryOperator {
 ////NOTE: the requirement of alignment
 struct __attribute__((aligned(64))) SIMDContinuation {
   __m512i v_probe_keys;
-  __m512i v_build_keys;
   __m512i  v_bucket_addrs;
   __m512i v_probe_offset;
   __mmask8 m_valid_probe;
-  SIMDContinuation(): v_probe_keys(_mm512_set1_epi64(0)),v_build_keys(_mm512_set1_epi64(0)),
+  SIMDContinuation(): v_probe_keys(_mm512_set1_epi64(0)),
       v_bucket_addrs(_mm512_set1_epi64(0)),v_probe_offset(_mm512_set1_epi64(0)),m_valid_probe(0){}
   void reset() {
        v_probe_keys =_mm512_set1_epi64(0);
-       v_build_keys = _mm512_set1_epi64(0);
        v_bucket_addrs = _mm512_set1_epi64(0);
        v_probe_offset = _mm512_set1_epi64(0);
        m_valid_probe = 0;
+     }
+  void* operator new(size_t size) { return memalign(64,size); }
+  void operator delete(void* mem) { return free(mem); }
+
+};
+struct __attribute__((aligned(64))) IMVState {
+  __m512i v_probe_keys;
+  __m512i  v_bucket_addrs;
+  __m512i v_probe_offset,v_probe_hash;
+  __mmask8 m_valid_probe;
+  uint8_t stage;
+  IMVState(): v_probe_keys(_mm512_set1_epi64(0)),
+      v_bucket_addrs(_mm512_set1_epi64(0)),v_probe_offset(_mm512_set1_epi64(0)),m_valid_probe(0),stage(1){}
+  void reset() {
+       v_probe_keys =_mm512_set1_epi64(0);
+       v_bucket_addrs = _mm512_set1_epi64(0);
+       v_probe_offset = _mm512_set1_epi64(0);
+       m_valid_probe = 0;
+       stage=1;
      }
   void* operator new(size_t size) { return memalign(64,size); }
   void operator delete(void* mem) { return free(mem); }
@@ -230,7 +247,7 @@ class Hashjoin : public BinaryOperator {
    } cont;
 
 /// struct for amac
-   static  const uint8_t stateNum=32;
+   static  const uint8_t stateNum=40, imvNum=8;
    struct AMACState {
      uint8_t stage;
      int probeKey=0;
@@ -240,9 +257,10 @@ class Hashjoin : public BinaryOperator {
    }amac_state[stateNum];
    struct AMACContinuation {
      int8_t done = 0, k=100;
-   }amac_cont;
+   }amac_cont,imv_cont;
 
    SIMDContinuation*  SIMDcon = nullptr;
+   IMVState* imv_state[imvNum+1];
 
  private:
    Shared& shared;
@@ -302,6 +320,8 @@ class Hashjoin : public BinaryOperator {
    pos_t joinRow();
    pos_t joinAMAC();
    pos_t joinFullSIMD();
+   pos_t joinSIMDAMAC();
+   pos_t joinIMV();
    virtual size_t next() override;
    ~Hashjoin();
 };

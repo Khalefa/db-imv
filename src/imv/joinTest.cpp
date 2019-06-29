@@ -140,14 +140,14 @@ int main(int argc, char* argv[]) {
   // run queries
   auto repetitions = atoi(argv[1]);
   size_t nrThreads = std::thread::hardware_concurrency();
-  size_t vectorSize = 10240;
+  size_t vectorSize = 1024;
   bool clearCaches = false;
   if (argc > 3)
     nrThreads = atoi(argv[3]);
 
   tbb::task_scheduler_init scheduler(nrThreads);
 #if 1
-/*
+#if 0
   joinFun = &vectorwise::Hashjoin::joinAllSIMD;
   e.timeAndProfile("joinAllSIMD    ",
       nrTuples(tpch, {"orders", "lineitem"}),
@@ -177,9 +177,24 @@ int main(int argc, char* argv[]) {
         join_vectorwise(tpch,nrThreads,vectorSize);
       },
       repetitions);
-      */
-  joinFun = &vectorwise::Hashjoin::joinFullSIMD;
+        joinFun = &vectorwise::Hashjoin::joinFullSIMD;
   e.timeAndProfile("joinFullSIMD  ",
+      nrTuples(tpch, {"orders", "lineitem"}),
+      [&]() {
+        join_vectorwise(tpch,nrThreads,vectorSize);
+      },
+      repetitions);
+
+  joinFun = &vectorwise::Hashjoin::joinSIMDAMAC;
+  e.timeAndProfile("joinSIMDAMAC  ",
+      nrTuples(tpch, {"orders", "lineitem"}),
+      [&]() {
+        join_vectorwise(tpch,nrThreads,vectorSize);
+      },
+      repetitions);
+#endif
+  joinFun = &vectorwise::Hashjoin::joinIMV;
+  e.timeAndProfile("joinIMV       ",
       nrTuples(tpch, {"orders", "lineitem"}),
       [&]() {
         join_vectorwise(tpch,nrThreads,vectorSize);
