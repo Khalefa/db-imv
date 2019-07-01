@@ -13,11 +13,14 @@
 #include "profile.hpp"
 #include "common/runtime/Import.hpp"
 #include <unordered_set>
+#include "imv/HashProbe.hpp"
 
 using namespace runtime;
 using namespace std;
 using vectorwise::primitives::Char_10;
 using vectorwise::primitives::hash_t;
+
+//static  const size_t morselSize = 100000;
 
 // select count(*) from lineitem, orders where  l_orderkey = o_orderkey;
 
@@ -30,11 +33,10 @@ bool join_hyper(Database& db, size_t nrThreads) {
 
   auto o_orderkey = ord["o_orderkey"].data<types::Integer>();
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
-  using hash = runtime::CRC32Hash;
+//  using hash = runtime::CRC32Hash;
+  using hash = runtime::MurMurHash;
   using range = tbb::blocked_range<size_t>;
   const auto add = [](const size_t& a, const size_t& b) {return a + b;};
-
-  const size_t morselSize = 100000;
 
   // build a hash table from [orders]
   Hashset<types::Integer, hash> ht1;
@@ -53,14 +55,23 @@ bool join_hyper(Database& db, size_t nrThreads) {
                                      add);
   ht1.setSize(found1);
   parallel_insert(entries1, ht1);
-
+  uint32_t probe_off[morselSize*10];
+  void* build_add[morselSize*10];
   // look up the hash table 1
   auto found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
     auto found = f;
+#if 0
     for (size_t i = r.begin(), end = r.end(); i != end; ++i)
     if ( ht1.contains(l_orderkey[i])) {
       found++;
     }
+#elif 1
+
+    found+=probe_amac(l_orderkey+r.begin(),r.size(),&ht1,build_add,probe_off);
+
+#else
+     found+=probe_row(l_orderkey+r.begin(),r.size(),&ht1,build_add,probe_off);
+#endif
     return found;
   },
                                      add);
@@ -192,7 +203,6 @@ int main(int argc, char* argv[]) {
         join_vectorwise(tpch,nrThreads,vectorSize);
       },
       repetitions);
-#endif
   joinFun = &vectorwise::Hashjoin::joinIMV;
   e.timeAndProfile("joinIMV       ",
       nrTuples(tpch, {"orders", "lineitem"}),
@@ -200,6 +210,7 @@ int main(int argc, char* argv[]) {
         join_vectorwise(tpch,nrThreads,vectorSize);
       },
       repetitions);
+#endif
   e.timeAndProfile("join hyper     ",
       nrTuples(tpch, {"orders", "lineitem"}),
       [&]() {

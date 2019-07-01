@@ -162,6 +162,14 @@ target_include_directories(hyper PUBLIC
     PRIVATE src)
 target_link_libraries(hyper common)
 
+add_library(imv
+  src/imv/HashProbe.cpp
+  )
+target_include_directories(imv PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    PRIVATE src)
+target_link_libraries(imv common)
 
 file(GLOB PRIMITIVES src/vectorwise/primitives/*.cpp)
 add_library(vectorwise
@@ -330,5 +338,5 @@ endif(AVX512EXPERIMENTS)
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
 
-  target_link_libraries(join_test tpch hyper vectorwise common  ${JEVENTSLIB})
+  target_link_libraries(join_test imv tpch hyper vectorwise  ${JEVENTSLIB})
 

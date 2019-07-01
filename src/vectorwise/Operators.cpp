@@ -216,17 +216,7 @@ pos_t Hashjoin::joinSIMDAMAC() {
   imv_cont.k=100;
   return found;
 }
-inline void compress(IMVState* state) {
-  state->v_bucket_addrs = _mm512_maskz_compress_epi64(state->m_valid_probe, state->v_bucket_addrs);
-  state->v_probe_keys = _mm512_maskz_compress_epi64(state->m_valid_probe, state->v_probe_keys);
-  state->v_probe_offset = _mm512_maskz_compress_epi64(state->m_valid_probe, state->v_probe_offset);
-}
-inline void expand(IMVState* src_state, IMVState* dest_state) {
-  dest_state->v_bucket_addrs = _mm512_mask_expand_epi64(dest_state->v_bucket_addrs, _mm512_knot(dest_state->m_valid_probe), src_state->v_bucket_addrs);
-  dest_state->v_probe_keys = _mm512_mask_expand_epi64(dest_state->v_probe_keys, _mm512_knot(dest_state->m_valid_probe), src_state->v_probe_keys);
-  dest_state->v_probe_offset = _mm512_mask_expand_epi64(dest_state->v_probe_offset, _mm512_knot(dest_state->m_valid_probe), src_state->v_probe_offset);
 
-}
 pos_t Hashjoin::joinIMV() {
   size_t found = 0;
   if (imv_cont.k == 100) {

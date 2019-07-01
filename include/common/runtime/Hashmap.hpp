@@ -12,7 +12,7 @@
 #include <map>
 #include <memory>
 #include <vector>
-
+#include "vectorwise/Primitives.hpp"
 namespace runtime {
 
 class Hashmap {
@@ -430,8 +430,8 @@ Hashmap::hash_t Hashmapx<K, V, H, useTags>::hash(const K& key, hash_t seed) {
 template <typename K, typename H, bool useTags = true>
 class Hashset : public Hashmap {
    H hasher;
-   static const uint64_t seed = 902850234;
-
+//   static const uint64_t seed = 902850234;
+   static const uint64_t seed = vectorwise::primitives::seed;
  public:
    struct Entry {
       EntryHeader h;
