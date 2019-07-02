@@ -221,8 +221,18 @@ struct __attribute__((aligned(64))) IMVState {
        m_valid_probe = 0;
        stage=1;
      }
-  void* operator new(size_t size) { return memalign(64,size); }
-  void operator delete(void* mem) { return free(mem); }
+  void* operator new(size_t size) {
+    return memalign(64, size);
+  }
+  void operator delete(void* mem) {
+    return free(mem);
+  }
+  void* operator new[](size_t size) {
+    return memalign(64, size);
+  }
+  void operator delete[](void* mem) {
+    return free(mem);
+  }
 
 };
 inline void compress(IMVState* state) {

@@ -263,13 +263,15 @@ pos_t Hashjoin::joinIMV() {
       case 1: {
         /// step 1: load the offsets of probing tuples
         imv_state[imv_cont.k]->v_probe_offset = _mm512_add_epi64(_mm512_set1_epi64(cont.nextProbe), v_base_offset);
-        cont.nextProbe += VECTORSIZE;
         imv_state[imv_cont.k]->m_valid_probe = _mm512_cmpgt_epu64_mask(v_base_offset_upper, imv_state[imv_cont.k]->v_probe_offset);
         /// step 2: gather the probe keys
-        v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, imv_state[imv_cont.k]->m_valid_probe, imv_state[imv_cont.k]->v_probe_offset, (void* )probeKeys, 4);
+        //v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, imv_state[imv_cont.k]->m_valid_probe, imv_state[imv_cont.k]->v_probe_offset, (void* )probeKeys, 4);
+        v256_probe_keys = _mm256_maskz_loadu_epi32(imv_state[imv_cont.k]->m_valid_probe, (char*)(probeKeys+cont.nextProbe));
+
         imv_state[imv_cont.k]->v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
         /// step 3: compute the hash values of probe keys
         imv_state[imv_cont.k]->v_probe_hash = runtime::MurMurHash()((imv_state[imv_cont.k]->v_probe_keys), (v_seed));
+        cont.nextProbe += VECTORSIZE;
         imv_state[imv_cont.k]->stage = 2;
         shared.ht.prefetchEntry((imv_state[imv_cont.k]->v_probe_hash));
       }break;
