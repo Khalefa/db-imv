@@ -19,15 +19,20 @@
 #define VECTORSIZE 8
 #define ROF_VECTOR_SIZE 10000
 #define PDIS 2048
-#define SEQ_PREFETCH 0
+#define SEQ_PREFETCH 1
+#define WRITE_SEQ_PREFETCH 0
+static int stateNum = vectorwise::Hashjoin::stateNum;
+
 #define UNLIKELY(expr) __builtin_expect(!!(expr), 0)
 #define LIKELY(expr) __builtin_expect(!!(expr), 1)
 using namespace vectorwise;
 using namespace runtime;
+using hash = runtime::MurMurHash;
 
 using hash_t = defs::hash_t;
 size_t probe_row(types::Integer* probe_keys, uint32_t num, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff=nullptr);
 size_t probe_imv(types::Integer* probe_keys, uint32_t num, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff=nullptr);
 size_t probe_simd(types::Integer* probe_keys, uint32_t num, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff=nullptr);
 size_t probe_amac(types::Integer* probe_keys, uint32_t num, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff=nullptr);
+size_t probe_gp(types::Integer* probe_keys, uint32_t num, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff=nullptr);
 size_t probe_simd_amac(types::Integer* probe_keys, uint32_t num, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff=nullptr);

@@ -21,7 +21,7 @@ using namespace runtime;
 using namespace std;
 using vectorwise::primitives::Char_10;
 using vectorwise::primitives::hash_t;
-#define RESULTS 0
+#define RESULTS 1
 //static  const size_t morselSize = 100000;
 
 int repetitions=0;
@@ -53,7 +53,7 @@ bool join_hyper(Database& db, size_t nrThreads) {
     auto found = f;
     auto& entries = entries1.local();
     for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
-#if 1
+#if 0
       if (true) {
 #else
         if(o_orderdate[i] >= c1){
@@ -90,10 +90,11 @@ bool join_hyper(Database& db, size_t nrThreads) {
 #endif
 #else
   vector<pair<string, decltype(compilerjoinFun)> >compilerName2fun;
-//  compilerName2fun.push_back(make_pair("probe_row",probe_row));
-//  compilerName2fun.push_back(make_pair("probe_simd",probe_simd));
-//    compilerName2fun.push_back(make_pair("probe_amac",probe_amac));
-//  compilerName2fun.push_back(make_pair("probe_simd_amac",probe_simd_amac));
+  compilerName2fun.push_back(make_pair("probe_row",probe_row));
+  compilerName2fun.push_back(make_pair("probe_simd",probe_simd));
+    compilerName2fun.push_back(make_pair("probe_amac",probe_amac));
+    compilerName2fun.push_back(make_pair("probe_gp",probe_gp));
+  compilerName2fun.push_back(make_pair("probe_simd_amac",probe_simd_amac));
   compilerName2fun.push_back(make_pair("probe_imv",probe_imv));
      PerfEvents event;
      uint64_t found2=0;
@@ -131,7 +132,7 @@ bool join_hyper(Database& db, size_t nrThreads) {
 bool pipeline(Database& db, size_t nrThreads) {
 
   auto resources = initQuery(nrThreads);
-  auto c1 = types::Date::castString("1995-01-01");
+  auto c1 = types::Date::castString("1996-01-01");
   auto c2 = types::Numeric<12, 2>::castString("0.07");
   auto c3 = types::Integer(24);
 
@@ -192,10 +193,13 @@ bool pipeline(Database& db, size_t nrThreads) {
 #endif
 #else
        vector<pair<string, decltype(pipelineFun)> >compilerName2fun;
-       compilerName2fun.push_back(make_pair("filter_probe_simd_amac",filter_probe_simd_amac));
-       compilerName2fun.push_back(make_pair("filter_probe_simd_imv",filter_probe_simd_imv));
-       compilerName2fun.push_back(make_pair("filter_probe_imv",filter_probe_imv));
+
        compilerName2fun.push_back(make_pair("filter_probe_imv1",filter_probe_imv1));
+       compilerName2fun.push_back(make_pair("filter_probe_imv",filter_probe_imv));
+       compilerName2fun.push_back(make_pair("filter_probe_simd_imv",filter_probe_simd_imv));
+       compilerName2fun.push_back(make_pair("filter_probe_simd_gp",filter_probe_simd_gp));
+       compilerName2fun.push_back(make_pair("filter_probe_simd_amac",filter_probe_simd_amac));
+       compilerName2fun.push_back(make_pair("filter_probe_scalar",filter_probe_scalar));
 
        PerfEvents event;
        uint64_t found2=0;
@@ -215,8 +219,8 @@ bool pipeline(Database& db, size_t nrThreads) {
      add);
  },
  repetitions);
-#if !RESULTS
-  cout << "hyper join results :" << found2 << endl;
+#if RESULTS
+  cout << "pipeline results :" << found2 << endl;
 #endif
   }
 #endif
@@ -342,7 +346,7 @@ int main(int argc, char* argv[]) {
   }
 #else
   pipeline(tpch, nrThreads);
-  // join_hyper(tpch, nrThreads);
+ //  join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
 #endif
   scheduler.terminate();

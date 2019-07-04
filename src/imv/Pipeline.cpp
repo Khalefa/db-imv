@@ -1,5 +1,6 @@
 #include "imv/Pipeline.hpp"
-uint64_t constrants = 240;
+auto c3 = types::Integer(20);
+uint64_t constrants = c3.value*100;
 size_t scan_filter_simd(types::Numeric<12, 2>* col, size_t& begin, size_t end, int constrants, uint64_t* pos_buff) {
   size_t found = 0;
   __mmask8 m_valid = -1, m_eval;
@@ -55,6 +56,44 @@ size_t filter_probe_simd_amac(size_t begin, size_t end, Database& db, runtime::H
 
   return found;
 }
+size_t filter_probe_scalar(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff) {
+  size_t found = 0, pos = 0;
+  auto& li = db["lineitem"];
+  auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
+  auto l_orderkey = li["l_orderkey"].data<types::Integer>();
+  int build_key_off = sizeof(runtime::Hashmap::EntryHeader);
+  for (size_t i = begin, size = 0; i < end;++i) {
+    if (constrants > l_quantity_col[i].value) {
+      auto probeKey = l_orderkey[i].value;
+      auto probeHash = runtime::MurMurHash()(probeKey, vectorwise::primitives::seed);
+      auto buildMatch = hash_table->find_chain_tagged(probeHash);
+
+      for (auto entry = buildMatch; entry != nullptr; entry = entry->next) {
+        uint32_t buildkey = *((uint32_t*) (((void*) entry) + build_key_off));
+        if ((buildkey == probeKey)) {
+          pos = pos < morselSize ? pos : 0;
+          output_build[pos] = ((void*) entry);
+          output_probe[pos] = (i);
+          ++found;
+          ++pos;
+        }
+      }
+    }
+  }
+  return found;
+}
+size_t filter_probe_simd_gp(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff) {
+  size_t found = 0;
+  auto& li = db["lineitem"];
+  auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
+  auto l_orderkey = li["l_orderkey"].data<types::Integer>();
+
+  for (size_t i = begin, size = 0; i < end; ) {
+     size = scan_filter_simd(l_quantity_col,i,end,constrants,pos_buff);
+     found += probe_gp(l_orderkey, size, hash_table, output_build, output_probe, pos_buff);
+  }
+  return found;
+}
 size_t filter_probe_simd_imv(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff) {
   size_t found = 0;
   auto& li = db["lineitem"];
@@ -77,7 +116,7 @@ size_t filter_probe_simd_imv(size_t begin, size_t end, Database& db, runtime::Ha
 #endif
   return found;
 }
-size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff) {
+size_t filter_probe_imv1(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff) {
   auto& li = db["lineitem"];
   auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
@@ -139,7 +178,7 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
         imv_state[k].v_probe_hash = runtime::MurMurHash()((imv_state[k].v_probe_keys), (v_seed));
         nextProbe += VECTORSIZE;
         imv_state[k].stage = 2;
-#if !SEQ_PREFETCH
+#if SEQ_PREFETCH
         _mm_prefetch((((char* )(probe_keys+nextProbe))+PDIS), _MM_HINT_T0);
         _mm_prefetch((((char* )(probe_keys+nextProbe))+PDIS+64), _MM_HINT_T0);
         _mm_prefetch((((char* )(l_quantity_col+nextProbe))+PDIS), _MM_HINT_T0);
@@ -157,7 +196,10 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
           nextProbe = nextProbe + _mm_popcnt_u32(m_new_probes);
           imv_state[k].m_valid_probe = _mm512_cmpgt_epu64_mask(v_base_offset_upper, imv_state[k].v_probe_offset);
           m_new_probes = _mm512_kand(m_new_probes, imv_state[k].m_valid_probe);
-#if !SEQ_PREFETCH
+          /// step 2: gather the probe keys
+          v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, imv_state[k].m_valid_probe, imv_state[k].v_probe_offset, (void* )probe_keys, 4);
+          imv_state[k].v_probe_keys = _mm512_mask_blend_epi64(imv_state[k].m_valid_probe, imv_state[k].v_probe_keys, _mm512_cvtepi32_epi64(v256_probe_keys));
+#if SEQ_PREFETCH
         _mm_prefetch((((char* )(probe_keys+nextProbe))+PDIS), _MM_HINT_T0);
         _mm_prefetch((((char* )(probe_keys+nextProbe))+PDIS+64), _MM_HINT_T0);
         _mm_prefetch((((char* )(l_quantity_col+nextProbe))+PDIS), _MM_HINT_T0);
@@ -168,9 +210,7 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
         imv_state[k].v_probe_hash = _mm512_mask_i64gather_epi64(imv_state[k].v_probe_hash ,m_new_probes, imv_state[k].v_probe_offset, (void* )l_quantity_col, 8);
         m_match = _mm512_cmpgt_epu64_mask(v_const, imv_state[k].v_probe_hash);
         if(m_match == imv_state[k].m_valid_probe) {
-          /// step 2: gather the probe keys
-          v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, imv_state[k].m_valid_probe, imv_state[k].v_probe_offset, (void* )probe_keys, 4);
-          imv_state[k].v_probe_keys = _mm512_mask_blend_epi64(imv_state[k].m_valid_probe, imv_state[k].v_probe_keys, _mm512_cvtepi32_epi64(v256_probe_keys));
+
         /// step 3: compute the hash values of probe keys
         imv_state[k].v_probe_hash = runtime::MurMurHash()((imv_state[k].v_probe_keys), (v_seed));
         imv_state[k].stage = 2;
@@ -204,7 +244,7 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
         m_match = _mm512_cmpeq_epi64_mask(imv_state[k].v_probe_keys, v_build_keys);
         m_match = _mm512_kand(m_match, imv_state[k].m_valid_probe);
         pos = pos + VECTORSIZE < morselSize ? pos : 0;
-#if SEQ_PREFETCH
+#if WRITE_SEQ_PREFETCH
         _mm_prefetch((char *)(((char *)(output_build+pos)) + PDIS), _MM_HINT_T0);
         _mm_prefetch((char *)(((char *)(output_build+pos)) + PDIS + 64), _MM_HINT_T0);
         _mm_prefetch((char *)(((char *)(output_probe+pos)) + PDIS), _MM_HINT_T0);
@@ -263,7 +303,7 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
   return found;
 }
 
-size_t filter_probe_imv1(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff) {
+size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff) {
   auto& li = db["lineitem"];
   auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
@@ -333,7 +373,7 @@ size_t filter_probe_imv1(size_t begin, size_t end, Database& db, runtime::Hashma
 #endif
         hash_table->prefetchEntry((imv_state[k].v_probe_hash));
 #else
-#if !SEQ_PREFETCH
+#if SEQ_PREFETCH
         _mm_prefetch((((char* )(probe_keys+nextProbe))+PDIS), _MM_HINT_T0);
         _mm_prefetch((((char* )(probe_keys+nextProbe))+PDIS+64), _MM_HINT_T0);
         _mm_prefetch((((char* )(l_quantity_col+nextProbe))+PDIS), _MM_HINT_T0);
@@ -365,6 +405,8 @@ size_t filter_probe_imv1(size_t begin, size_t end, Database& db, runtime::Hashma
               imv_state[k].m_valid_probe = 0;
               imv_state[k].stage = 1;
               imv_state[imvNum1].stage = 4;
+              --k;
+              break;
             } else {
               // expand imv_state[imvNum1] -> expand imv_state[k]
               expand(&imv_state[imvNum1], &imv_state[k]);
@@ -409,7 +451,7 @@ size_t filter_probe_imv1(size_t begin, size_t end, Database& db, runtime::Hashma
         m_match = _mm512_cmpeq_epi64_mask(imv_state[k].v_probe_keys, v_build_keys);
         m_match = _mm512_kand(m_match, imv_state[k].m_valid_probe);
         pos = pos + VECTORSIZE < morselSize ? pos : 0;
-#if SEQ_PREFETCH
+#if WRITE_SEQ_PREFETCH
         _mm_prefetch((char *)(((char *)(output_build+pos)) + PDIS), _MM_HINT_T0);
         _mm_prefetch((char *)(((char *)(output_build+pos)) + PDIS + 64), _MM_HINT_T0);
         _mm_prefetch((char *)(((char *)(output_probe+pos)) + PDIS), _MM_HINT_T0);
