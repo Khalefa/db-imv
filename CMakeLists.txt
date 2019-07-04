@@ -164,6 +164,7 @@ target_link_libraries(hyper common)
 
 add_library(imv
   src/imv/HashProbe.cpp
+    src/imv/Pipeline.cpp
   )
 target_include_directories(imv PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
