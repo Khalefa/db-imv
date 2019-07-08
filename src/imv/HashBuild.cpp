@@ -29,7 +29,7 @@ size_t build_gp(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_t
       state[k].ptr = (Hashmap::EntryHeader*) allo->allocate(entry_size);
       *(int*) (((char*) state[k].ptr) + build_key_off) = o_orderkey[cur].value;
       state[k].hash_value = hash()(o_orderkey[cur], primitives::seed);
-      _mm_prefetch((char*)(hash_table->entries + (state[k].hash_value & hash_table->mask)), _MM_HINT_T0);
+      hash_table->PrefetchEntry(state[k].hash_value);
     }
     stage2_num = k;
     for (k = 0; k < stage2_num; ++k) {
@@ -150,10 +150,8 @@ size_t build_imv(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_
         state[k].v_hash_value = runtime::MurMurHash()(v_build_key, v_seed);
         state[k].stage = 0;
         state[k].valid_size = valid_size;
-        hash_value = (uint64_t*) &state[k].v_hash_value;
-        for (int i = 0; i < valid_size; ++i) {
-          _mm_prefetch((char * )(hash_table->entries + (hash_value[i] & hash_table->mask)), _MM_HINT_T0);
-        }
+
+        hash_table->prefetchEntry(state[k].v_hash_value);
       }
         break;
       case 0: {

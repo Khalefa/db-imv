@@ -317,7 +317,7 @@ size_t probe_amac(types::Integer* probe_keys, uint32_t probe_num, runtime::Hashm
         ++nextProbe;
         amac_state[k].probeKey = probeKey;
         amac_state[k].probeHash = probeHash;
-        _mm_prefetch((char * )(hash_table->entries + probeHash), _MM_HINT_T0);
+        hash_table->PrefetchEntry(probeHash);
         amac_state[k].stage = 2;
       }
         break;
@@ -388,7 +388,7 @@ size_t probe_gp(types::Integer* probe_keys, uint32_t num, runtime::Hashmap* hash
       amac_state[k].tuple_id = nextProbe;
       amac_state[k].probeKey = probeKey;
       amac_state[k].probeHash = probeHash;
-      _mm_prefetch((char * )(hash_table->entries + probeHash), _MM_HINT_T0);
+      hash_table->PrefetchEntry(probeHash);
     }
     valid_size = k;
     done = 0;

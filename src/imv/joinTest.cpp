@@ -70,7 +70,7 @@ bool join_hyper(Database& db, size_t nrThreads) {
         add);
     ht1.setSize(found1);
     parallel_insert(entries1, ht1);
-#elif 1
+#elif 0
 
   auto buildHT = [&](string funName,decltype(buildFun) build_fun) {
     Hashset<types::Integer, hash> ht1;
@@ -85,6 +85,7 @@ bool join_hyper(Database& db, size_t nrThreads) {
         },
         add);
     cout<<funName<<"  hash table tuples num = "<< found1<<endl;
+ //   ht1.printSta();
     ht1.clear();
   };
   vector<pair<string, decltype(buildFun)> > buildName2fun;
@@ -145,14 +146,14 @@ bool join_hyper(Database& db, size_t nrThreads) {
 #if RESULTS
   cout << "hyper join results :" << found2 << endl;
 #endif
-#elif 0
+#elif 1
   vector<pair<string, decltype(compilerjoinFun)> > compilerName2fun;
   compilerName2fun.push_back(make_pair("probe_row", probe_row));
-//  compilerName2fun.push_back(make_pair("probe_simd",probe_simd));
-//    compilerName2fun.push_back(make_pair("probe_amac",probe_amac));
-//    compilerName2fun.push_back(make_pair("probe_gp",probe_gp));
-//  compilerName2fun.push_back(make_pair("probe_simd_amac",probe_simd_amac));
-//  compilerName2fun.push_back(make_pair("probe_imv",probe_imv));
+  compilerName2fun.push_back(make_pair("probe_simd",probe_simd));
+    compilerName2fun.push_back(make_pair("probe_amac",probe_amac));
+    compilerName2fun.push_back(make_pair("probe_gp",probe_gp));
+  compilerName2fun.push_back(make_pair("probe_simd_amac",probe_simd_amac));
+  compilerName2fun.push_back(make_pair("probe_imv",probe_imv));
   PerfEvents event;
   uint64_t found2 = 0;
   for (auto name2fun : compilerName2fun) {
@@ -402,8 +403,8 @@ int main(int argc, char* argv[]) {
         repetitions);
   }
 #else
-//  pipeline(tpch, nrThreads);
-  join_hyper(tpch, nrThreads);
+ pipeline(tpch, nrThreads);
+//   join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
 #endif
   scheduler.terminate();
