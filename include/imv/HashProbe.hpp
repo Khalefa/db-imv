@@ -22,6 +22,7 @@
 #define SEQ_PREFETCH 1
 #define WRITE_SEQ_PREFETCH 0
 static int stateNum = vectorwise::Hashjoin::stateNum;
+static int stateNumSIMD = vectorwise::Hashjoin::imvNum;
 
 #define UNLIKELY(expr) __builtin_expect(!!(expr), 0)
 #define LIKELY(expr) __builtin_expect(!!(expr), 1)
