@@ -73,12 +73,15 @@ class Hashmap {
    Hashmap(const Hashmap&) = delete;
    inline ~Hashmap();
    inline void printSta();
- private:
-   inline Hashmap::EntryHeader* ptr(Hashmap::EntryHeader* p);
-   inline ptr_t tag(hash_t p);
-   inline Vec8u tag(Vec8u p);
+   inline Vec8u update(Vec8u old,Vec8u p,Vec8u hash);
+   inline Vec8u ptr(Vec8u p);
    inline Hashmap::EntryHeader* update(Hashmap::EntryHeader* old,
                                        Hashmap::EntryHeader* p, hash_t hash);
+   inline Hashmap::EntryHeader* ptr(Hashmap::EntryHeader* p);
+ private:
+
+   inline ptr_t tag(hash_t p);
+   inline Vec8u tag(Vec8u p);
 };
 
 extern Hashmap::EntryHeader notFound;
@@ -120,12 +123,18 @@ inline Vec8u Hashmap::tag(Vec8u hashes) {
 inline Hashmap::EntryHeader* Hashmap::ptr(Hashmap::EntryHeader* p) {
    return (EntryHeader*)((ptr_t)p & maskPointer);
 }
+inline Vec8u Hashmap::ptr(Vec8u p){
+  return (p & Vec8u(maskPointer));
+}
 
 inline Hashmap::EntryHeader* Hashmap::update(Hashmap::EntryHeader* old,
                                              Hashmap::EntryHeader* p,
                                              Hashmap::hash_t hash) {
    return reinterpret_cast<EntryHeader*>((size_t)p | ((size_t)old & maskTag) |
                                          tag(hash));
+}
+inline Vec8u Hashmap::update(Vec8u old,Vec8u p,Vec8u hash) {
+  return (p | (old & Vec8u(maskTag)) | tag(hash));
 }
 
 inline Hashmap::EntryHeader* Hashmap::find_chain(hash_t hash) {

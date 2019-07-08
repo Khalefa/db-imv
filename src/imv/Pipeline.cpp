@@ -484,6 +484,8 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
               imv_state[k].m_valid_probe = 0;
               imv_state[k].stage = 1;
               imv_state[imvNum].stage= 0;
+              --k;
+              break;
             } else {
               // expand imv_state[imvNum] -> expand imv_state[k]
               expand(&imv_state[imvNum], &imv_state[k]);

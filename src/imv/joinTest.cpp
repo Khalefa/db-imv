@@ -16,6 +16,7 @@
 #include "imv/HashProbe.hpp"
 #include <vector>
 #include "imv/Pipeline.hpp"
+#include "imv/HashBuild.hpp"
 
 using namespace runtime;
 using namespace std;
@@ -45,7 +46,7 @@ bool join_hyper(Database& db, size_t nrThreads) {
   using hash = runtime::MurMurHash;
   using range = tbb::blocked_range<size_t>;
   const auto add = [](const size_t& a, const size_t& b) {return a + b;};
-
+#if 0
   // build a hash table from [orders]
   Hashset<types::Integer, hash> ht1;
   tbb::enumerable_thread_specific<runtime::Stack<decltype(ht1)::Entry>> entries1;
@@ -53,7 +54,7 @@ bool join_hyper(Database& db, size_t nrThreads) {
     auto found = f;
     auto& entries = entries1.local();
     for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
-#if 0
+#if 1
       if (true) {
 #else
         if(o_orderdate[i] >= c1){
@@ -67,6 +68,30 @@ bool join_hyper(Database& db, size_t nrThreads) {
                                      add);
   ht1.setSize(found1);
   parallel_insert(entries1, ht1);
+#else
+  Hashset<types::Integer, hash> ht1;
+  ht1.setSize(ord.nrTuples);
+  auto entry_size = sizeof(decltype(ht1)::Entry);
+  auto found1 = tbb::parallel_reduce(range(0, ord.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+    auto found = f;
+#if 0
+    for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
+      decltype(ht1)::Entry* ptr =(decltype(ht1)::Entry*)runtime::this_worker->allocator.allocate(entry_size);
+
+      ptr->k = o_orderkey[i];
+     ptr->h.hash = ht1.hash(ptr->k);
+     //auto head= ht1.entries+ptr->h.hash;
+     ht1.insert_tagged(&(ptr->h),ptr->h.hash);
+      ++found;
+    }
+#else
+    found +=build_simd(r.begin(),r.end(),db,&ht1,&this_worker->allocator,entry_size);
+#endif
+    return found;
+  },
+                                     add);
+  cout<<"Build hash table tuples num = "<< found1<<endl;
+#endif
   uint32_t probe_off[morselSize];
   void* build_add[morselSize];
 #if 0
@@ -91,11 +116,11 @@ bool join_hyper(Database& db, size_t nrThreads) {
 #else
   vector<pair<string, decltype(compilerjoinFun)> >compilerName2fun;
   compilerName2fun.push_back(make_pair("probe_row",probe_row));
-  compilerName2fun.push_back(make_pair("probe_simd",probe_simd));
-    compilerName2fun.push_back(make_pair("probe_amac",probe_amac));
-    compilerName2fun.push_back(make_pair("probe_gp",probe_gp));
-  compilerName2fun.push_back(make_pair("probe_simd_amac",probe_simd_amac));
-  compilerName2fun.push_back(make_pair("probe_imv",probe_imv));
+//  compilerName2fun.push_back(make_pair("probe_simd",probe_simd));
+//    compilerName2fun.push_back(make_pair("probe_amac",probe_amac));
+//    compilerName2fun.push_back(make_pair("probe_gp",probe_gp));
+//  compilerName2fun.push_back(make_pair("probe_simd_amac",probe_simd_amac));
+//  compilerName2fun.push_back(make_pair("probe_imv",probe_imv));
      PerfEvents event;
      uint64_t found2=0;
   for(auto name2fun: compilerName2fun) {
@@ -345,8 +370,8 @@ int main(int argc, char* argv[]) {
         repetitions);
   }
 #else
-  pipeline(tpch, nrThreads);
- //  join_hyper(tpch, nrThreads);
+//  pipeline(tpch, nrThreads);
+   join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
 #endif
   scheduler.terminate();
