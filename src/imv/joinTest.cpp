@@ -1,3 +1,4 @@
+#pragma once
 #include "benchmarks/tpch/Queries.hpp"
 #include "common/runtime/Hash.hpp"
 #include "common/runtime/Types.hpp"
@@ -17,6 +18,7 @@
 #include <vector>
 #include "imv/Pipeline.hpp"
 #include "imv/HashBuild.hpp"
+#include "imv/HashAgg.hpp"
 using namespace types;
 using namespace runtime;
 using namespace std;
@@ -36,7 +38,7 @@ auto buildFun = &build_raw;
 
 bool agg(Database& db, size_t nrThreads) {
   /*
-   * select sum(l_discount) from lineitem group by l_returnflag;
+   * select sum(l_discount) from lineitem group by l_orderkey;
    */
   auto resources = initQuery(nrThreads);
   auto& li = db["lineitem"];
@@ -164,6 +166,155 @@ bool agg(Database& db, size_t nrThreads) {
   leaveQuery(nrThreads);
   return true;
 }
+bool agg_intkey(Database& db, size_t nrThreads) {
+  /*
+   * select sum(l_discount) from lineitem group by l_returnflag;
+   */
+  auto resources = initQuery(nrThreads);
+  auto& li = db["lineitem"];
+ // auto l_returnflag = li["l_returnflag"].data<types::Char<1>>();
+  auto l_orderkey = li["l_orderkey"].data<types::Integer>();
+
+  auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
+  using hash = runtime::MurMurHash;
+  using range = tbb::blocked_range<size_t>;
+  const auto add = [](const size_t& a, const size_t& b) {return a + b;};
+
+  tbb::enumerable_thread_specific<Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>> hash_table;
+
+  using group_t = typename decltype(hash_table)::value_type::Entry;
+  int agg_constrant = 50;
+
+  /// Memory for materialized entries in hashmap
+  tbb::enumerable_thread_specific<runtime::Stack<group_t>> entries;
+  /// Memory for spilling hastable entries
+  tbb::enumerable_thread_specific<runtime::PartitionedDeque<1024>> partitionedDeques;
+  // check answers
+/*  std::map<uint32_t,uint64_t>right_ans;
+  for(size_t i =0; i< li.nrTuples;++i) {
+    if(l_orderkey[i].value>50)continue;
+    right_ans[l_orderkey[i].value] += l_discount[i].value;
+  }
+  for(auto it : right_ans) {
+    cout<<it.first<<"\t"<<it.second<<endl;
+  }*/
+  // local aggregation
+  auto found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+    auto found = f;
+    bool exist=false;
+    auto& ht = hash_table.local(exist);
+    auto& localEntries = entries.local();
+
+    if(!exist) {
+      ht.setSize(102400);
+    }
+    auto& partition = partitionedDeques.local(exist);
+    if(!exist) {
+      partition.postConstruct(nrThreads * 4, sizeof(group_t));
+    }
+#if 0
+    for (size_t i = r.begin(), end = r.end(); i < end; ++i) {
+      if(l_orderkey[i].value>50)continue;
+      hash_t hash_value = hash()(l_orderkey[i],primitives::seed);
+      auto entry = ht.findOneEntry(l_orderkey[i],hash_value);
+      if(!entry) {
+        entry = (group_t*)partition.partition_allocate(hash_value);
+        entry->h.hash=hash_value;
+        entry->h.next = nullptr;
+        entry->k = l_orderkey[i];
+        entry->v = types::Numeric<12, 2>();
+        ht.insert<false>(*entry);
+      }
+      entry->v=entry->v +l_discount[i];
+      ++found;
+    }
+#else
+  //  found += agg_local_raw(r.begin(),r.end(),db,&ht,&partition);
+    found += agg_local_amac(r.begin(),r.end(),db,&ht,&partition);
+
+#endif
+    return found;
+  },
+                                     add);
+
+  auto printResult = [&](BlockRelation* result) {
+    size_t found = 0;
+    auto nameAttr = result->getAttribute("l_orderkey");
+    auto sumAttr = result->getAttribute("sum_discount");
+    for (auto& block : *result) {
+      auto elementsInBlock = block.size();
+      found += elementsInBlock;
+      auto name = reinterpret_cast<types::Integer*>(block.data(nameAttr));
+      auto sum = reinterpret_cast<types::Numeric<12, 2>*>(block.data(sumAttr));
+      for (size_t i = 0; i < elementsInBlock; ++i) {
+        cout << name[i] << "\t" << sum[i] << endl;
+      }
+    }
+    cout << found << endl;
+  };
+  cout << "local agg num = " << found2 << endl;
+
+  // global aggregation: each thread process some partitions
+  // aggregate from spill partitions
+  auto nrPartitions = partitionedDeques.begin()->getPartitions().size();
+  /* push aggregated groups into following pipeline*/
+  auto& result = resources.query->result;
+  auto retAttr = result->addAttribute("l_orderkey", sizeof(types::Integer));
+  auto discountAttr = result->addAttribute("sum_discount", sizeof(types::Numeric<12, 2>));
+
+  tbb::parallel_for(0ul, nrPartitions, [&](auto partitionNr) {
+    auto& ht = hash_table.local();
+    auto& localEntries = entries.local();
+    ht.clear();
+    localEntries.clear();
+    /* aggregate values from all deques for partitionNr
+     */
+
+    for (auto& deque : partitionedDeques) {
+      auto& partition = deque.getPartitions()[partitionNr];
+      for (auto chunk = partition.first; chunk; chunk = chunk->next) {
+        for (auto value = chunk->template data<group_t>(),
+            end = value + partition.size(chunk, sizeof(group_t));
+            value < end; value++) {
+          value->h.next = nullptr;/*NOTE: get rid of searching old next in the new hash table*/
+          if(value->k>agg_constrant) continue;
+          auto entry = ht.findOneEntry(value->k,value->h.hash);
+          if(!entry) {
+            localEntries.emplace_back(value->h.hash,value->k,types::Numeric<12, 2>());
+            auto& g = localEntries.back();
+            ht.insert<false>(g);
+            entry = &g;
+          }
+          entry->v = entry->v + value->v;
+        }
+      }
+    }
+
+    auto consume = [&](runtime::Stack<group_t>& /*auto&*/entries) {
+      auto n = entries.size();
+      auto block = result->createBlock(n);
+      auto ret = reinterpret_cast<types::Integer*>(block.data(retAttr));
+      auto disc = reinterpret_cast<types::Numeric<12, 2>*>(block.data(discountAttr));
+      auto ret_=ret;
+      auto disc_ =disc;
+      for (auto blocks : entries) {
+        for (auto& entry : blocks) {
+          *ret++ = entry.k;
+          *disc++ = entry.v;
+        }
+      }
+      block.addedElements(n);
+    };
+    if (!localEntries.empty()) {
+      consume(localEntries);
+    }
+  });
+
+  printResult(resources.query->result.get());
+  leaveQuery(nrThreads);
+  return true;
+}
+
 bool join_hyper(Database& db, size_t nrThreads) {
 
   auto resources = initQuery(nrThreads);
@@ -538,7 +689,7 @@ int main(int argc, char* argv[]) {
   // pipeline(tpch, nrThreads);
 //   join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
-  agg(tpch, nrThreads);
+  agg_intkey(tpch, nrThreads);
 #endif
   scheduler.terminate();
   return 0;

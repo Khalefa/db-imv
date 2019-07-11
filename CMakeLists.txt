@@ -166,6 +166,8 @@ add_library(imv
   src/imv/HashProbe.cpp
     src/imv/Pipeline.cpp
     src/imv/HashBuild.cpp
+    src/imv/HashAgg.cpp
+    
   )
 target_include_directories(imv PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
