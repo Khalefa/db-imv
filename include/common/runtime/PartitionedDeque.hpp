@@ -36,6 +36,8 @@ class PartitionedDeque
       void* current = nullptr;
       void* end = nullptr;
       void push_back(void* element, size_t size);
+      void* allocate1entry(size_t size);
+
       size_t size(Chunk* chunk, size_t entrySize) const;
 
       Partition() = default;
@@ -60,7 +62,7 @@ class PartitionedDeque
    ~PartitionedDeque();
 
    void push_back(void* element, hash_t hash);
-
+   inline void* partition_allocate(hash_t hash);
    const std::vector<Partition>& getPartitions();
 
    /// Size of one entry in bytes
@@ -121,6 +123,11 @@ void PartitionedDeque<chunkSize>::push_back(void* element, hash_t hash) {
    // use upper bits of hash
    partitions[hash >> shift].push_back(element, entrySize);
 }
+template <size_t chunkSize>
+inline void* PartitionedDeque<chunkSize>::partition_allocate(hash_t hash) {
+   // use upper bits of hash
+   return partitions[hash >> shift].allocate1entry(entrySize);
+}
 
 template <size_t chunkSize>
 void PartitionedDeque<chunkSize>::Partition::push_back(void* element,
@@ -141,6 +148,27 @@ void PartitionedDeque<chunkSize>::Partition::push_back(void* element,
    }
    std::memcpy(current, element, entrySize);
    current = addBytes(current, entrySize);
+}
+template <size_t chunkSize>
+void* PartitionedDeque<chunkSize>::Partition::allocate1entry(size_t entrySize) {
+  // just allocate one entry
+   if (!first) {
+      auto created = newChunk(entrySize);
+      first = created;
+      last = created;
+      current = created->template data<void>();
+      end = addBytes(current, entrySize * chunkSize);
+   }
+   if (current == end) {
+      auto created = newChunk(entrySize);
+      last->next = created;
+      last = created;
+      current = created->template data<void>();
+      end = addBytes(current, entrySize * chunkSize);
+   }
+   void* old = current;
+   current = addBytes(current, entrySize);
+   return old;
 }
 
 template <size_t chunkSize>

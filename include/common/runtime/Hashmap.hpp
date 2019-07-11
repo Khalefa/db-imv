@@ -275,7 +275,8 @@ class Hashmapx : public Hashmap {
  public:
   using key_type = K;
   using value_type = V;
-  static const uint64_t seed = 902850234;
+ // static const uint64_t seed = 902850234;
+  static const uint64_t seed=vectorwise::primitives::seed;
   struct Entry {
     EntryHeader h;
     K k;

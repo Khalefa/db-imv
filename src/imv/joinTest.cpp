@@ -17,14 +17,16 @@
 #include <vector>
 #include "imv/Pipeline.hpp"
 #include "imv/HashBuild.hpp"
-
+using namespace types;
 using namespace runtime;
 using namespace std;
 using vectorwise::primitives::Char_10;
 using vectorwise::primitives::hash_t;
+
 #define RESULTS 1
 //static  const size_t morselSize = 100000;
-
+using hash = runtime::MurMurHash;
+using range = tbb::blocked_range<size_t>;
 int repetitions = 0;
 // select count(*) from lineitem, orders where  l_orderkey = o_orderkey;
 auto vectorJoinFun = &vectorwise::Hashjoin::joinAMAC;
@@ -32,6 +34,136 @@ auto compilerjoinFun = &probe_amac;
 auto pipelineFun = &filter_probe_simd_imv;
 auto buildFun = &build_raw;
 
+bool agg(Database& db, size_t nrThreads) {
+  /*
+   * select sum(l_discount) from lineitem group by l_returnflag;
+   */
+  auto resources = initQuery(nrThreads);
+  auto& li = db["lineitem"];
+  auto l_returnflag = li["l_returnflag"].data<types::Char<1>>();
+  auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
+  using hash = runtime::MurMurHash;
+  using range = tbb::blocked_range<size_t>;
+  const auto add = [](const size_t& a, const size_t& b) {return a + b;};
+
+  tbb::enumerable_thread_specific<Hashmapx<types::Char<1>, types::Numeric<12, 2>, hash, false>> hash_table;
+
+  using group_t = typename decltype(hash_table)::value_type::Entry;
+
+  /// Memory for materialized entries in hashmap
+  tbb::enumerable_thread_specific<runtime::Stack<group_t>> entries;
+  /// Memory for spilling hastable entries
+  tbb::enumerable_thread_specific<runtime::PartitionedDeque<1024>> partitionedDeques;
+  // local aggregation
+  int ptimes = 0;
+  auto found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+    auto found = f;
+    bool exist=false;
+    auto& ht = hash_table.local(exist);
+    auto& localEntries = entries.local();
+
+    if(!exist) {
+      ht.setSize(1024);
+    }
+    auto& partition = partitionedDeques.local(exist);
+    if(!exist) {
+      partition.postConstruct(nrThreads * 4, sizeof(group_t));
+    }
+
+    for (size_t i = r.begin(), end = r.end(); i < end; ++i) {
+      hash_t hash_value = hash()(l_returnflag[i],primitives::seed);
+      auto entry = ht.findOneEntry(l_returnflag[i],hash_value);
+      if(!entry) {
+        entry = (group_t*)partition.partition_allocate(hash_value);
+        entry->h.hash=hash_value;
+        entry->h.next = nullptr;
+        entry->k = l_returnflag[i];
+        entry->v = types::Numeric<12, 2>();
+        ht.insert<false>(*entry);
+      }
+      entry->v=entry->v +l_discount[i];
+      ++found;
+    }
+    return found;
+  },
+                                     add);
+
+  auto printResult = [&](BlockRelation* result) {
+    size_t found = 0;
+    auto nameAttr = result->getAttribute("l_returnflag");
+    auto sumAttr = result->getAttribute("sum_discount");
+    for (auto& block : *result) {
+      auto elementsInBlock = block.size();
+      found += elementsInBlock;
+      auto name = reinterpret_cast<types::Char<1>*>(block.data(nameAttr));
+      auto sum = reinterpret_cast<types::Numeric<12, 2>*>(block.data(sumAttr));
+      for (size_t i = 0; i < elementsInBlock; ++i) {
+        cout << name[i] << "\t" << sum[i] << endl;
+      }
+    }
+    cout << found << endl;
+  };
+  cout << "local agg num = " << found2 << endl;
+
+  // global aggregation: each thread process some partitions
+  // aggregate from spill partitions
+  auto nrPartitions = partitionedDeques.begin()->getPartitions().size();
+  /* push aggregated groups into following pipeline*/
+  auto& result = resources.query->result;
+  auto retAttr = result->addAttribute("l_returnflag", sizeof(types::Char<1>));
+  auto discountAttr = result->addAttribute("sum_discount", sizeof(types::Numeric<12, 2>));
+
+  tbb::parallel_for(0ul, nrPartitions, [&](auto partitionNr) {
+    auto& ht = hash_table.local();
+    auto& localEntries = entries.local();
+    ht.clear();
+    localEntries.clear();
+    /* aggregate values from all deques for partitionNr
+     */
+
+    for (auto& deque : partitionedDeques) {
+      auto& partition = deque.getPartitions()[partitionNr];
+      for (auto chunk = partition.first; chunk; chunk = chunk->next) {
+        for (auto value = chunk->template data<group_t>(),
+            end = value + partition.size(chunk, sizeof(group_t));
+            value < end; value++) {
+          value->h.next = nullptr;/*NOTE: get rid of searching old next in the new hash table*/
+          auto entry = ht.findOneEntry(value->k,value->h.hash);
+          if(!entry) {
+            localEntries.emplace_back(value->h.hash,value->k,types::Numeric<12, 2>());
+            auto& g = localEntries.back();
+            ht.insert<false>(g);
+            entry = &g;
+          }
+          entry->v = entry->v + value->v;
+        }
+      }
+    }
+
+    auto consume = [&](runtime::Stack<group_t>& /*auto&*/entries) {
+      auto n = entries.size();
+      auto block = result->createBlock(n);
+      auto ret = reinterpret_cast<types::Char<1>*>(block.data(retAttr));
+      auto disc = reinterpret_cast<types::Numeric<12, 2>*>(block.data(discountAttr));
+      auto ret_=ret;
+      auto disc_ =disc;
+      for (auto blocks : entries) {
+        for (auto& entry : blocks) {
+          *ret++ = entry.k;
+          *disc++ = entry.v;
+        }
+      }
+      block.addedElements(n);
+    };
+    if (!localEntries.empty()) {
+      consume(localEntries);
+    }
+  });
+
+  printResult(resources.query->result.get());
+  leaveQuery(nrThreads);
+  return true;
+}
 bool join_hyper(Database& db, size_t nrThreads) {
 
   auto resources = initQuery(nrThreads);
@@ -72,58 +204,58 @@ bool join_hyper(Database& db, size_t nrThreads) {
     parallel_insert(entries1, ht1);
 #elif 0
 
-  auto buildHT = [&](string funName,decltype(buildFun) build_fun) {
-    Hashset<types::Integer, hash> ht1;
-    ht1.setSize(ord.nrTuples);
-    auto entry_size = sizeof(decltype(ht1)::Entry);
-    auto found1 = tbb::parallel_reduce(range(0, ord.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
-          auto found = f;
+    auto buildHT = [&](string funName,decltype(buildFun) build_fun) {
+      Hashset<types::Integer, hash> ht1;
+      ht1.setSize(ord.nrTuples);
+      auto entry_size = sizeof(decltype(ht1)::Entry);
+      auto found1 = tbb::parallel_reduce(range(0, ord.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+            auto found = f;
 
-          found +=build_fun(r.begin(),r.end(),db,&ht1,&this_worker->allocator,entry_size);
+            found +=build_fun(r.begin(),r.end(),db,&ht1,&this_worker->allocator,entry_size);
 
-          return found;
-        },
-        add);
-    cout<<funName<<"  hash table tuples num = "<< found1<<endl;
- //   ht1.printSta();
-    ht1.clear();
-  };
-  vector<pair<string, decltype(buildFun)> > buildName2fun;
-  buildName2fun.push_back(make_pair("build_raw", build_raw));
-  buildName2fun.push_back(make_pair("build_simd", build_simd));
-  buildName2fun.push_back(make_pair("build_gp", build_gp));
-  buildName2fun.push_back(make_pair("build_imv", build_imv));
-  PerfEvents event;
+            return found;
+          },
+          add);
+      cout<<funName<<"  hash table tuples num = "<< found1<<endl;
+      //   ht1.printSta();
+      ht1.clear();
+    };
+    vector<pair<string, decltype(buildFun)> > buildName2fun;
+    buildName2fun.push_back(make_pair("build_raw", build_raw));
+    buildName2fun.push_back(make_pair("build_simd", build_simd));
+    buildName2fun.push_back(make_pair("build_gp", build_gp));
+    buildName2fun.push_back(make_pair("build_imv", build_imv));
+    PerfEvents event;
 
-  for (auto name2fun : buildName2fun) {
-    event.timeAndProfile(name2fun.first, 10000, [&]() {
-      buildHT(name2fun.first, name2fun.second);},
-      repetitions);
-  }
+    for (auto name2fun : buildName2fun) {
+      event.timeAndProfile(name2fun.first, 10000, [&]() {
+            buildHT(name2fun.first, name2fun.second);},
+          repetitions);
+    }
 
 #else
   Hashset<types::Integer, hash> ht1;
   ht1.setSize(ord.nrTuples);
   auto entry_size = sizeof(decltype(ht1)::Entry);
   auto found1 = tbb::parallel_reduce(range(0, ord.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
-        auto found = f;
+    auto found = f;
 #if 0
-        for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
-          decltype(ht1)::Entry* ptr =(decltype(ht1)::Entry*)runtime::this_worker->allocator.allocate(entry_size);
+                                     for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
+                                       decltype(ht1)::Entry* ptr =(decltype(ht1)::Entry*)runtime::this_worker->allocator.allocate(entry_size);
 
-          ptr->k = o_orderkey[i];
-          ptr->h.hash = ht1.hash(ptr->k);
-          //auto head= ht1.entries+ptr->h.hash;
-          ht1.insert_tagged(&(ptr->h),ptr->h.hash);
-          ++found;
-        }
+                                       ptr->k = o_orderkey[i];
+                                       ptr->h.hash = ht1.hash(ptr->k);
+                                       //auto head= ht1.entries+ptr->h.hash;
+                                     ht1.insert_tagged(&(ptr->h),ptr->h.hash);
+                                     ++found;
+                                   }
 #else
-        found +=build_gp(r.begin(),r.end(),db,&ht1,&this_worker->allocator,entry_size);
+                                     found +=build_gp(r.begin(),r.end(),db,&ht1,&this_worker->allocator,entry_size);
 #endif
-        return found;
-      },
-      add);
-  cout<<"Build hash table tuples num = "<< found1<<endl;
+                                     return found;
+                                   },
+                                     add);
+  cout << "Build hash table tuples num = " << found1 << endl;
 #endif
   uint32_t probe_off[morselSize];
   void* build_add[morselSize];
@@ -149,33 +281,33 @@ bool join_hyper(Database& db, size_t nrThreads) {
 #elif 1
   vector<pair<string, decltype(compilerjoinFun)> > compilerName2fun;
   compilerName2fun.push_back(make_pair("probe_row", probe_row));
-  compilerName2fun.push_back(make_pair("probe_simd",probe_simd));
-    compilerName2fun.push_back(make_pair("probe_amac",probe_amac));
-    compilerName2fun.push_back(make_pair("probe_gp",probe_gp));
-  compilerName2fun.push_back(make_pair("probe_simd_amac",probe_simd_amac));
-  compilerName2fun.push_back(make_pair("probe_imv",probe_imv));
+  compilerName2fun.push_back(make_pair("probe_simd", probe_simd));
+  compilerName2fun.push_back(make_pair("probe_amac", probe_amac));
+  compilerName2fun.push_back(make_pair("probe_gp", probe_gp));
+  compilerName2fun.push_back(make_pair("probe_simd_amac", probe_simd_amac));
+  compilerName2fun.push_back(make_pair("probe_imv", probe_imv));
   PerfEvents event;
   uint64_t found2 = 0;
   for (auto name2fun : compilerName2fun) {
     compilerjoinFun = name2fun.second;
 
     event.timeAndProfile(name2fun.first, 10000, [&]() {
-          found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
-                auto found = f;
+      found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+            auto found = f;
 #if 0
-                for (size_t i = r.begin(), end = r.end(); i != end; ++i)
-                if ( ht1.contains(l_orderkey[i])) {
-                  found++;
-                }
+                         for (size_t i = r.begin(), end = r.end(); i != end; ++i)
+                         if ( ht1.contains(l_orderkey[i])) {
+                           found++;
+                         }
 
 #else
-                found+=compilerjoinFun(l_orderkey+r.begin(),r.size(),&ht1,build_add,probe_off, nullptr);
+                         found+=compilerjoinFun(l_orderkey+r.begin(),r.size(),&ht1,build_add,probe_off, nullptr);
 #endif
-                return found;
-              },
-              add);
-        },
-        repetitions);
+                         return found;
+                       },
+                       add);
+                 },
+                         repetitions);
 #if RESULTS
     cout << "hyper join results :" << found2 << endl;
 #endif
@@ -299,8 +431,8 @@ repetitions);
   auto lineitem = Scan("lineitem");
 
   HashJoin(Buffer(cust_ord, sizeof(pos_t)), vectorJoinFun).addBuildKey(Column(order, "o_orderkey"), conf.hash_int32_t_col(), primitives::scatter_int32_t_col)
-      .addProbeKey(Column(lineitem, "l_orderkey"),          //
-                   conf.hash_int32_t_col(),         //
+      .addProbeKey(Column(lineitem, "l_orderkey"),  //
+                   conf.hash_int32_t_col(),  //
       primitives::keys_equal_int32_t_col);
 
   // count(*)
@@ -403,9 +535,10 @@ int main(int argc, char* argv[]) {
         repetitions);
   }
 #else
- pipeline(tpch, nrThreads);
+  // pipeline(tpch, nrThreads);
 //   join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
+  agg(tpch, nrThreads);
 #endif
   scheduler.terminate();
   return 0;
