@@ -172,7 +172,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
    */
   auto resources = initQuery(nrThreads);
   auto& li = db["lineitem"];
- // auto l_returnflag = li["l_returnflag"].data<types::Char<1>>();
+  // auto l_returnflag = li["l_returnflag"].data<types::Char<1>>();
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
 
   auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
@@ -190,14 +190,14 @@ bool agg_intkey(Database& db, size_t nrThreads) {
   /// Memory for spilling hastable entries
   tbb::enumerable_thread_specific<runtime::PartitionedDeque<1024>> partitionedDeques;
   // check answers
-/*  std::map<uint32_t,uint64_t>right_ans;
-  for(size_t i =0; i< li.nrTuples;++i) {
-    if(l_orderkey[i].value>50)continue;
-    right_ans[l_orderkey[i].value] += l_discount[i].value;
-  }
-  for(auto it : right_ans) {
-    cout<<it.first<<"\t"<<it.second<<endl;
-  }*/
+  /*  std::map<uint32_t,uint64_t>right_ans;
+   for(size_t i =0; i< li.nrTuples;++i) {
+   if(l_orderkey[i].value>50)continue;
+   right_ans[l_orderkey[i].value] += l_discount[i].value;
+   }
+   for(auto it : right_ans) {
+   cout<<it.first<<"\t"<<it.second<<endl;
+   }*/
   // local aggregation
   auto found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
     auto found = f;
@@ -213,28 +213,28 @@ bool agg_intkey(Database& db, size_t nrThreads) {
       partition.postConstruct(nrThreads * 4, sizeof(group_t));
     }
 #if 0
-    for (size_t i = r.begin(), end = r.end(); i < end; ++i) {
-      if(l_orderkey[i].value>50)continue;
-      hash_t hash_value = hash()(l_orderkey[i],primitives::seed);
-      auto entry = ht.findOneEntry(l_orderkey[i],hash_value);
-      if(!entry) {
-        entry = (group_t*)partition.partition_allocate(hash_value);
-        entry->h.hash=hash_value;
-        entry->h.next = nullptr;
-        entry->k = l_orderkey[i];
-        entry->v = types::Numeric<12, 2>();
-        ht.insert<false>(*entry);
-      }
-      entry->v=entry->v +l_discount[i];
-      ++found;
-    }
+                                     for (size_t i = r.begin(), end = r.end(); i < end; ++i) {
+                                       if(l_orderkey[i].value>50)continue;
+                                       hash_t hash_value = hash()(l_orderkey[i],primitives::seed);
+                                       auto entry = ht.findOneEntry(l_orderkey[i],hash_value);
+                                       if(!entry) {
+                                         entry = (group_t*)partition.partition_allocate(hash_value);
+                                         entry->h.hash=hash_value;
+                                         entry->h.next = nullptr;
+                                         entry->k = l_orderkey[i];
+                                         entry->v = types::Numeric<12, 2>();
+                                         ht.insert<false>(*entry);
+                                       }
+                                       entry->v=entry->v +l_discount[i];
+                                       ++found;
+                                     }
 #else
-  //  found += agg_local_raw(r.begin(),r.end(),db,&ht,&partition);
-    found += agg_local_amac(r.begin(),r.end(),db,&ht,&partition);
+                                     //  found += agg_local_raw(r.begin(),r.end(),db,&ht,&partition);
+                                     found += agg_local_gp(r.begin(),r.end(),db,&ht,&partition);
 
 #endif
-    return found;
-  },
+                                     return found;
+                                   },
                                      add);
 
   auto printResult = [&](BlockRelation* result) {
@@ -282,7 +282,10 @@ bool agg_intkey(Database& db, size_t nrThreads) {
           if(!entry) {
             localEntries.emplace_back(value->h.hash,value->k,types::Numeric<12, 2>());
             auto& g = localEntries.back();
+#if TEST_LOCAL
+#else
             ht.insert<false>(g);
+#endif
             entry = &g;
           }
           entry->v = entry->v + value->v;
