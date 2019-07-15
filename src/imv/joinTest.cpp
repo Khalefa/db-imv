@@ -230,7 +230,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
                                      }
 #else
                                      //  found += agg_local_raw(r.begin(),r.end(),db,&ht,&partition);
-                                     found += agg_local_gp(r.begin(),r.end(),db,&ht,&partition);
+                                     found += agg_local_simd(r.begin(),r.end(),db,&ht,&partition);
 
 #endif
                                      return found;
@@ -282,7 +282,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
           if(!entry) {
             localEntries.emplace_back(value->h.hash,value->k,types::Numeric<12, 2>());
             auto& g = localEntries.back();
-#if TEST_LOCAL
+#if !TEST_LOCAL
 #else
             ht.insert<false>(g);
 #endif

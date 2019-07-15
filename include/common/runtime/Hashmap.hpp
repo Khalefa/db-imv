@@ -34,6 +34,8 @@ class Hashmap {
   };
   /// Returns the first entry of the chain for the given hash
   inline EntryHeader* find_chain(hash_t hash);
+  inline Vec8uM find_chain(Vec8u hashes);
+
   /// Returns the first entry of the chain for the given hash
   /// Uses pointer tagging as a filter to quickly determine whether hash is
   /// contained
@@ -147,6 +149,12 @@ inline Vec8u Hashmap::update(Vec8u old, Vec8u p, Vec8u hash) {
 inline Hashmap::EntryHeader* Hashmap::find_chain(hash_t hash) {
   auto pos = hash & mask;
   return entries[pos].load(std::memory_order_relaxed);
+}
+inline Vec8uM Hashmap::find_chain(Vec8u hashes){
+  auto pos = hashes & Vec8u(mask);
+  Vec8u candidates = _mm512_i64gather_epi64(pos, (const long long int* )entries, 8);
+  __mmask8 matches = candidates != Vec8u(uint64_t(0));
+  return {candidates, matches};
 }
 
 template<bool concurrentInsert>
