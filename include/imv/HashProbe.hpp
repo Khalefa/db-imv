@@ -31,6 +31,13 @@ using namespace runtime;
 using hash = runtime::MurMurHash;
 
 using hash_t = defs::hash_t;
+inline void v_prefetch(__m512i& vec){
+  uint64_t * ht_pos = (uint64_t*)&vec;
+  for (int i = 0; i < VECTORSIZE; ++i) {
+    _mm_prefetch((char * )(ht_pos[i]), _MM_HINT_T0);
+    _mm_prefetch(((char * )(ht_pos[i]) + 64), _MM_HINT_T0);
+  }
+}
 size_t probe_row(types::Integer* probe_keys, uint32_t num, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff=nullptr);
 size_t probe_imv(types::Integer* probe_keys, uint32_t num, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff=nullptr);
 size_t probe_simd(types::Integer* probe_keys, uint32_t num, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff=nullptr);
