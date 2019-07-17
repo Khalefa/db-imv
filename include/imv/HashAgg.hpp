@@ -1,5 +1,7 @@
 #pragma once
 #include "imv/HashProbe.hpp"
+#define ORDERKEY 0
+
 struct AMACState {
   uint8_t stage;
   int probeKey = 0;
@@ -45,12 +47,15 @@ struct __attribute__((aligned(64))) AggState {
     v_probe_keys = _mm512_maskz_compress_epi64(m_valid_probe, v_probe_keys);
     v_probe_value = _mm512_maskz_compress_epi64(m_valid_probe, v_probe_value);
     v_probe_offset = _mm512_maskz_compress_epi64(m_valid_probe, v_probe_offset);
+    v_probe_hash = _mm512_maskz_compress_epi64(m_valid_probe, v_probe_hash);
+
   }
   inline void expand(AggState& src_state) {
     v_bucket_addrs = _mm512_mask_expand_epi64(v_bucket_addrs, _mm512_knot(m_valid_probe), src_state.v_bucket_addrs);
     v_probe_keys = _mm512_mask_expand_epi64(v_probe_keys, _mm512_knot(m_valid_probe), src_state.v_probe_keys);
     v_probe_value = _mm512_mask_expand_epi64(v_probe_value, _mm512_knot(m_valid_probe), src_state.v_probe_value);
     v_probe_offset = _mm512_mask_expand_epi64(v_probe_offset, _mm512_knot(m_valid_probe), src_state.v_probe_offset);
+    v_probe_hash = _mm512_mask_expand_epi64(v_probe_hash, _mm512_knot(m_valid_probe), src_state.v_probe_hash);
 
   }
 };
@@ -80,4 +85,8 @@ size_t agg_gp(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, t
 size_t agg_simd(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>* hash_table,
                 PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
 size_t agg_imv(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>* hash_table,
+               PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
+size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>* hash_table,
+               PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
+size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>* hash_table,
                PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);

@@ -185,7 +185,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
   tbb::enumerable_thread_specific<Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>> hash_table;
 
   using group_t = typename decltype(hash_table)::value_type::Entry;
-  int agg_constrant = 50;
+  int agg_constrant = 2000;
   auto printResult = [&](BlockRelation* result) {
     size_t found = 0;
     auto nameAttr = result->getAttribute("l_orderkey");
@@ -196,6 +196,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
       auto name = reinterpret_cast<types::Integer*>(block.data(nameAttr));
       auto sum = reinterpret_cast<types::Numeric<12, 2>*>(block.data(sumAttr));
       for (size_t i = 0; i < elementsInBlock; ++i) {
+        if(name[i].value>agg_constrant || name[i].value< agg_constrant-10) continue;
         cout << name[i] << "\t" << sum[i] << endl;
       }
     }
@@ -214,51 +215,28 @@ bool agg_intkey(Database& db, size_t nrThreads) {
   tbb::enumerable_thread_specific<vector<group_t*>> entry_addrs;
   tbb::enumerable_thread_specific<vector<group_t*>> results_addrs;
 
-  // check answers
-  /*  std::map<uint32_t,uint64_t>right_ans;
-   for(size_t i =0; i< li.nrTuples;++i) {
-   if(l_orderkey[i].value>50)continue;
-   right_ans[l_orderkey[i].value] += l_discount[i].value;
-   }
-   for(auto it : right_ans) {
-   cout<<it.first<<"\t"<<it.second<<endl;
-   }*/
   // local aggregation
   auto found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
     auto found = f;
     bool exist=false;
     auto& ht = hash_table.local(exist);
-    auto& localEntries = entries.local();
+ //   auto& localEntries = entries.local();
 
     if(!exist) {
-      ht.setSize(1024000);
+#if ORDERKEY
+      ht.setSize(1500000);
+#else
+      ht.setSize(100000);
+
+#endif
     }
     auto& partition = partitionedDeques.local(exist);
     if(!exist) {
       partition.postConstruct(nrThreads * 4, sizeof(group_t));
     }
-#if 0
-                                     for (size_t i = r.begin(), end = r.end(); i < end; ++i) {
-                                       //     if(l_orderkey[i].value>50)continue;
-                                     hash_t hash_value = hash()(l_orderkey[i],primitives::seed);
-                                     auto entry = ht.findOneEntry(l_orderkey[i],hash_value);
-                                     if(!entry) {
-                                       entry = (group_t*)partition.partition_allocate(hash_value);
-                                       entry->h.hash=hash_value;
-                                       entry->h.next = nullptr;
-                                       entry->k = l_orderkey[i];
-                                       entry->v = types::Numeric<12, 2>();
-                                       ht.insert<false>(*entry);
-                                       ++found;
-                                     }
-                                     entry->v=entry->v +l_discount[i];
-                                   }
-#else
-                                     found += aggFun(r.begin(),r.end(),db,&ht,&partition,nullptr,nullptr);
-
-#endif
-                                     return found;
-                                   },
+    found += aggFun(r.begin(),r.end(),db,&ht,&partition,nullptr,nullptr);
+    return found;
+  },
                                      add);
   cout << "local agg num = " << found2 << endl;
 
@@ -267,12 +245,27 @@ bool agg_intkey(Database& db, size_t nrThreads) {
   auto nrPartitions = partitionedDeques.begin()->getPartitions().size();
 
   tbb::parallel_for(0ul, nrPartitions, [&](auto partitionNr) {
-    auto& ht = hash_table.local();
-    auto& localEntries = entries.local();
+    bool exist=false;
+    auto& ht = hash_table.local(exist);
+ //   auto& localEntries = entries.local();
+
+    if(!exist) {
+#if ORDERKEY
+      ht.setSize(1500000);
+#else
+      ht.setSize(100000);
+
+#endif
+    }
     ht.clear();
-    localEntries.clear();
+    auto& partition = partitionedDeques.local(exist);
+    if(!exist) {
+      partition.postConstruct(nrThreads * 4, sizeof(group_t));
+    }
     /* aggregate values from all deques for partitionNr     */
 #if 0
+    auto& localEntries = entries.local();
+    localEntries.clear();
                     for (auto& deque : partitionedDeques) {
                       auto& partition = deque.getPartitions()[partitionNr];
                       for (auto chunk = partition.first; chunk; chunk = chunk->next) {
@@ -325,18 +318,18 @@ bool agg_intkey(Database& db, size_t nrThreads) {
                       auto& partition = deque.getPartitions()[partitionNr];
                       for (auto chunk = partition.first; chunk; chunk = chunk->next) {
                         for (auto value = chunk->template data<group_t>(), end = value + partition.size(chunk, sizeof(group_t)); value < end; value++) {
-                      //    if(value->k>agg_constrant) continue;
+                          //    if(value->k>agg_constrant) continue;
 
-                          entry_addrs_.push_back(value);
-                        }
-                      }
-                    }
-                    results_addrs_.resize(entry_addrs_.size());
-                    auto found = aggFun(0,entry_addrs_.size(),db,&ht,nullptr,(void**)&entry_addrs_[0],(void**)&results_addrs_[0]);
-                    if(found>0) {
-                      auto block = result->createBlock(found);
-                      auto ret = reinterpret_cast<types::Integer*>(block.data(retAttr));
-                      auto disc = reinterpret_cast<types::Numeric<12, 2>*>(block.data(discountAttr));
+                    entry_addrs_.push_back(value);
+                  }
+                }
+              }
+              results_addrs_.resize(entry_addrs_.size());
+              auto found = aggFun(0,entry_addrs_.size(),db,&ht,nullptr,(void**)&entry_addrs_[0],(void**)&results_addrs_[0]);
+              if(found>0) {
+                auto block = result->createBlock(found);
+                auto ret = reinterpret_cast<types::Integer*>(block.data(retAttr));
+                auto disc = reinterpret_cast<types::Numeric<12, 2>*>(block.data(discountAttr));
 #if 0
                     write_results((int*)ret,(uint64_t*)disc,(void**)&results_addrs_[0],found);
 #else
@@ -350,18 +343,20 @@ bool agg_intkey(Database& db, size_t nrThreads) {
 
 #endif
                   });
-  //printResult(resources.query->result.get());
+  printResult(resources.query->result.get());
 
   leaveQuery(nrThreads);
   return true;
 }
 void test_agg(Database& db, size_t nrThreads) {
   vector<pair<string, decltype(aggFun)> > agg_name2fun;
+ // agg_name2fun.push_back(make_pair("agg_simd", agg_simd));
+  agg_name2fun.push_back(make_pair("agg_imv_merged", agg_imv_merged));
+  agg_name2fun.push_back(make_pair("agg_imv", agg_imv));
+  agg_name2fun.push_back(make_pair("agg_imv_serial", agg_imv_serial));
   agg_name2fun.push_back(make_pair("agg_raw", agg_raw));
   agg_name2fun.push_back(make_pair("agg_gp", agg_gp));
   agg_name2fun.push_back(make_pair("agg_amac", agg_amac));
-  agg_name2fun.push_back(make_pair("agg_simd", agg_simd));
-  agg_name2fun.push_back(make_pair("agg_imv", agg_imv));
 
   PerfEvents event;
   uint64_t found2 = 0;
@@ -369,6 +364,7 @@ void test_agg(Database& db, size_t nrThreads) {
     cout << name2fun.first << "  results :---------------" << endl;
     aggFun = name2fun.second;
     event.timeAndProfile(name2fun.first, 10000, [&]() {agg_intkey(db,nrThreads);}, repetitions);
+
   }
 }
 bool join_hyper(Database& db, size_t nrThreads) {
