@@ -8,4 +8,6 @@ namespace runtime {
 
    /// imports star schema benchmark from CSVs in dir into db
    void importSSB(std::string dir, Database& db);
+
+   void importSSB_modified(std::string dir, Database& db);
 }

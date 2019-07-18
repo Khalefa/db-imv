@@ -684,6 +684,17 @@ int main(int argc, char* argv[]) {
               "[SIMDsel = 0]";
     exit(1);
   }
+
+
+  Database ssb;
+  // load ssb data
+  importSSB_modified(argv[2], ssb);
+  ssb.modifyDB();
+  for(auto it : ssb.modify.str2id) {
+    cout<<"str,id = "<<it.first<<" , "<<it.second<<endl;
+  }
+  return 0;
+
   Database tpch;
   // load tpch data
   importTPCH(argv[2], tpch);

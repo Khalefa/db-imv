@@ -373,7 +373,6 @@ void importTPCH(std::string dir, Database& db) {
       parseColumns(rel, columns, dir, "region");
    }
 }
-
 void importSSB(std::string dir, Database& db) {
 
    //--------------------------------------------------------------------------------
@@ -411,6 +410,106 @@ void importSSB(std::string dir, Database& db) {
                               {"p_mfgr", make_unique<algebra::Char>(6)},
                               {"p_category", make_unique<algebra::Char>(7)},
                               {"p_brand1", make_unique<algebra::Char>(9)},
+                              {"p_color", make_unique<algebra::Varchar>(11)},
+                              {"p_type", make_unique<algebra::Varchar>(25)},
+                              {"p_size", make_unique<algebra::Integer>()},
+                              {"p_container", make_unique<algebra::Char>(10)}});
+      parseColumns(rel, columns, dir, rel.name);
+   }
+   //--------------------------------------------------------------------------------
+   // supplier
+   {
+      auto& rel = db["supplier"];
+      rel.name = "supplier";
+      auto columns = configX({{"s_suppkey", make_unique<algebra::Integer>()},
+                              {"s_name", make_unique<algebra::Char>(25)},
+                              {"s_address", make_unique<algebra::Varchar>(25)},
+                              {"s_city", make_unique<algebra::Char>(10)},
+                              {"s_nation", make_unique<algebra::Char>(15)},
+                              {"s_region", make_unique<algebra::Char>(12)},
+                              {"s_phone", make_unique<algebra::Char>(15)}});
+      parseColumns(rel, columns, dir, rel.name);
+   }
+   //--------------------------------------------------------------------------------
+   // customer
+   {
+      auto& rel = db["customer"];
+      rel.name = "customer";
+      auto columns =
+          configX({{"c_custkey", make_unique<algebra::Integer>()},
+                   {"c_name", make_unique<algebra::Varchar>(25)},
+                   {"c_address", make_unique<algebra::Varchar>(25)},
+                   {"c_city", make_unique<algebra::Char>(10)},
+                   {"c_nation", make_unique<algebra::Char>(15)},
+                   {"c_region", make_unique<algebra::Char>(12)},
+                   {"c_phone", make_unique<algebra::Char>(15)},
+                   {"c_mktsegment", make_unique<algebra::Char>(10)}});
+      parseColumns(rel, columns, dir, rel.name);
+   }
+   //--------------------------------------------------------------------------------
+   // date
+   {
+      auto& rel = db["date"];
+      rel.name = "date";
+      auto columns =
+          configX({{"d_datekey", make_unique<algebra::Integer>()},
+                   {"d_date", make_unique<algebra::Char>(18)},
+                   {"d_dayofweek", make_unique<algebra::Char>(9)},
+                   {"d_month", make_unique<algebra::Char>(9)},
+                   {"d_year", make_unique<algebra::Integer>()},
+                   {"d_yearmonthnum", make_unique<algebra::Integer>()},
+                   {"d_yearmonth", make_unique<algebra::Char>(7)},
+                   {"d_daynuminweek", make_unique<algebra::Integer>()},
+                   {"d_daynuminmonth", make_unique<algebra::Integer>()},
+                   {"d_daynuminyear", make_unique<algebra::Integer>()},
+                   {"d_monthnuminyear", make_unique<algebra::Integer>()},
+                   {"d_weeknuminyear", make_unique<algebra::Integer>()},
+                   {"d_sellingseasin", make_unique<algebra::Varchar>(12)},
+                   {"d_lastdayinweekfl", make_unique<algebra::Integer>()},
+                   {"d_lastdayinmonthfl", make_unique<algebra::Integer>()},
+                   {"d_holidayfl", make_unique<algebra::Integer>()},
+                   {"d_weekdayfl", make_unique<algebra::Integer>()}});
+      parseColumns(rel, columns, dir, rel.name);
+   }
+}
+
+void importSSB_modified(std::string dir, Database& db) {
+
+   //--------------------------------------------------------------------------------
+   // lineorder
+   {
+      auto& rel = db["lineorder"];
+      rel.name = "lineorder";
+      auto columns =
+          configX({{"lo_orderkey", make_unique<algebra::Integer>()},
+                   {"lo_linenumber", make_unique<algebra::Integer>()},
+                   {"lo_custkey", make_unique<algebra::Integer>()},
+                   {"lo_partkey", make_unique<algebra::Integer>()},
+                   {"lo_suppkey", make_unique<algebra::Integer>()},
+                   {"lo_orderdate", make_unique<algebra::Integer>()},
+                   {"lo_orderpriority", make_unique<algebra::Char>(15)},
+                   {"lo_shippriority", make_unique<algebra::Char>(1)},
+                   {"lo_quantity", make_unique<algebra::Integer>()},
+                   {"lo_extendedprice", make_unique<algebra::Numeric>(18, 2)},
+                   {"lo_ordtotalprice", make_unique<algebra::Numeric>(18, 2)},
+                   {"lo_discount", make_unique<algebra::Numeric>(18, 2)},
+                   {"lo_revenue", make_unique<algebra::Numeric>(18, 2)},
+                   {"lo_supplycost", make_unique<algebra::Numeric>(18, 2)},
+                   {"lo_tax", make_unique<algebra::Integer>()},
+                   {"lo_commitdate", make_unique<algebra::Integer>()},
+                   {"lo_shopmode", make_unique<algebra::Char>(10)}});
+      parseColumns(rel, columns, dir, rel.name);
+   }
+   //--------------------------------------------------------------------------------
+   // part
+   {
+      auto& rel = db["part"];
+      rel.name = "part_modified";
+      auto columns = configX({{"p_partkey", make_unique<algebra::Integer>()},
+                              {"p_name", make_unique<algebra::Varchar>(22)},
+                              {"p_mfgr", make_unique<algebra::Integer>()},
+                              {"p_category", make_unique<algebra::Integer>()},
+                              {"p_brand1", make_unique<algebra::Integer>()},
                               {"p_color", make_unique<algebra::Varchar>(11)},
                               {"p_type", make_unique<algebra::Varchar>(25)},
                               {"p_size", make_unique<algebra::Integer>()},

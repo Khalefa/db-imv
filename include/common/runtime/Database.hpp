@@ -171,6 +171,21 @@ inline BlockRelation::Attribute BlockRelation::getAttribute(std::string name) {
       throw std::runtime_error("Unknown attribute: " + name);
    return attrIter->second;
 }
+class ModifyCol{
+ public:
+  std::unordered_map<std::string,uint64_t*> col_addresses;
+  std::unordered_map<std::string,uint64_t>str2id;
+  std::unordered_map<uint64_t,std::string>id2str;
+  uint64_t get_id(std::string str);
+  std::string& get_str(uint64_t id);
+  uint64_t* get_addr(std::string col);
+  ~ModifyCol() {
+    for(auto it : col_addresses) {
+      free(it.second);
+      it.second = nullptr;
+    }
+  }
+};
 
 class Database {
    std::unordered_map<std::string, Relation> relations;
@@ -181,5 +196,7 @@ class Database {
    Database(const Database&) = delete;
    Relation& operator[](std::string key);
    bool hasRelation(std::string name);
+   ModifyCol modify;
+   void modifyDB();
 };
 } // namespace runtime
