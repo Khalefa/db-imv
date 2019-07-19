@@ -25,7 +25,7 @@ size_t build_gp(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_t
 
   while (cur < end) {
     /// step 1: get probe key and compute hashing
-    for (k = 0; (k < stateNum) && (cur < end); ++k,++cur) {
+    for (k = 0; (k < stateNum) && (cur < end); ++k, ++cur) {
       state[k].ptr = (Hashmap::EntryHeader*) allo->allocate(entry_size);
       *(int*) (((char*) state[k].ptr) + build_key_off) = o_orderkey[cur].value;
       state[k].hash_value = hash()(o_orderkey[cur], primitives::seed);
@@ -40,14 +40,54 @@ size_t build_gp(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_t
   }
   return found;
 }
+size_t build_amac(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, Allocator*allo, int entry_size) {
+  size_t found = 0, cur = begin;
+  auto& ord = db["orders"];
+  auto o_orderkey = ord["o_orderkey"].data<types::Integer>();
+  int build_key_off = sizeof(runtime::Hashmap::EntryHeader);
+  uint8_t done = 0, k = 0;
+  BuildState state[stateNum];
+
+  for (int i = 0; i < stateNum; ++i) {
+    state[i].stage = 1;
+  }
+
+  while (done < stateNum) {
+    k = (k >= stateNum) ? 0 : k;
+    switch (state[k].stage) {
+      case 1: {
+        if (cur >= end) {
+          ++done;
+          state[k].stage = 3;
+          break;
+        }
+        state[k].ptr = (Hashmap::EntryHeader*) allo->allocate(entry_size);
+        *(int*) (((char*) state[k].ptr) + build_key_off) = o_orderkey[cur].value;
+        state[k].hash_value = hash()(o_orderkey[cur], primitives::seed);
+        ++cur;
+        state[k].stage = 0;
+        hash_table->PrefetchEntry(state[k].hash_value);
+      }
+        break;
+      case 0: {
+        hash_table->insert_tagged(state[k].ptr, state[k].hash_value);
+        ++found;
+        state[k].stage = 1;
+      }
+        break;
+    }
+    ++k;
+  }
+  return found;
+}
 size_t build_simd(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, Allocator*allo, int entry_size) {
   size_t found = 0, valid_size = VECTORSIZE;
   auto& ord = db["orders"];
   auto o_orderkey = ord["o_orderkey"].data<types::Integer>();
   int build_key_off = sizeof(runtime::Hashmap::EntryHeader);
-  __m512i v_build_key, v_offset, v_base_entry_off, v_entry_addr, v_key_off = _mm512_set1_epi64(build_key_off), v_build_hash_mask, v_zero = _mm512_set1_epi64(0),
-      v_all_ones = _mm512_set1_epi64(-1), v_conflict, v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_seed = _mm512_set1_epi64(primitives::seed),
-      v_build_hash, v_old_next, v_old_next_ptr;
+  __m512i v_build_key, v_offset, v_base_entry_off, v_entry_addr, v_key_off = _mm512_set1_epi64(build_key_off), v_build_hash_mask, v_zero = _mm512_set1_epi64(0), v_all_ones =
+      _mm512_set1_epi64(-1), v_conflict, v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_seed = _mm512_set1_epi64(primitives::seed), v_build_hash, v_old_next,
+      v_old_next_ptr;
 
   __mmask8 m_valid_build = -1, m_no_conflict, m_rest;
   __m256i v256_zero = _mm256_set1_epi32(0);
@@ -98,7 +138,7 @@ size_t build_simd(size_t begin, size_t end, Database& db, runtime::Hashmap* hash
 #else
     /// scalar codes due to writhe conflicts among multi-threads
     hash_table->insert_tagged((Vec8u*) (&v_entry_addr), (Vec8u*) (&v_build_hash), valid_size);
-    found+=valid_size;
+    found += valid_size;
 #endif
   }
   return found;
@@ -109,8 +149,8 @@ size_t build_imv(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_
   auto& ord = db["orders"];
   auto o_orderkey = ord["o_orderkey"].data<types::Integer>();
   int build_key_off = sizeof(runtime::Hashmap::EntryHeader);
-  __m512i v_build_key, v_offset, v_base_entry_off, v_key_off = _mm512_set1_epi64(build_key_off), v_build_hash_mask, v_zero = _mm512_set1_epi64(0), v_all_ones =
-      _mm512_set1_epi64(-1), v_conflict, v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_seed = _mm512_set1_epi64(primitives::seed);
+  __m512i v_build_key, v_offset, v_base_entry_off, v_key_off = _mm512_set1_epi64(build_key_off), v_build_hash_mask, v_zero = _mm512_set1_epi64(0), v_all_ones = _mm512_set1_epi64(
+      -1), v_conflict, v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_seed = _mm512_set1_epi64(primitives::seed);
 
   __mmask8 m_valid_build = -1, m_no_conflict, m_rest;
   __m256i v256_zero = _mm256_set1_epi32(0), v256_build_key;
@@ -157,7 +197,7 @@ size_t build_imv(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_
       case 0: {
         /// scalar codes due to writhe conflicts among multi-threads
         hash_table->insert_tagged((Vec8u*) (&state[k].v_entry_addr), (Vec8u*) (&state[k].v_hash_value), state[k].valid_size);
-        found+=state[k].valid_size;
+        found += state[k].valid_size;
         state[k].stage = 1;
         state[k].valid_size = 0;
       }

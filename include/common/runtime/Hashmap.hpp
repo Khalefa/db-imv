@@ -51,6 +51,7 @@ class Hashmap {
   template<bool concurrentInsert = true>
   inline void insert_tagged(EntryHeader* entry, hash_t hash);
   inline void insert_tagged(Vec8u* entry, Vec8u* hash, int size);
+  inline void insert_tagged_sel(Vec8u* entry, Vec8u* hash, __mmask8 sel);
 
   /// Insert n entries starting from first, always looking for the next entry
   /// step bytes after the previous
@@ -210,6 +211,14 @@ inline Vec8uM Hashmap::find_chain_tagged_sel(Vec8u hashes, __mmask8 sel) {
 inline void Hashmap::insert_tagged(Vec8u* entry, Vec8u* hash, int size) {
   for (int i = 0; i < size; ++i) {
     insert_tagged((EntryHeader*) (entry->entry[i]), hash->entry[i]);
+  }
+}
+
+inline void Hashmap::insert_tagged_sel(Vec8u* entry, Vec8u* hash, __mmask8 sel){
+  for (int i = 0; i < 8; ++i) {
+    if(sel & (1<<i)) {
+      insert_tagged((EntryHeader*) (entry->entry[i]), hash->entry[i]);
+    }
   }
 }
 

@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
    PerfEvents e;
    Database ssb;
    // load ssb data
-   importSSB_modified(argv[2], ssb);
+   importSSB(argv[2], ssb);
 
    // run queries
    auto repetitions = atoi(argv[1]);
@@ -55,7 +55,7 @@ int main(int argc, char* argv[]) {
 
 
    std::unordered_set<std::string> q = {
-       "1.1h", "1.1v", "1.1i", "1.2h", "1.2v", "1.3h", "1.3v", "2.1h", "2.1v", "2.2h",
+       "1.1h", "1.1v", "1.2h", "1.2v", "1.3h", "1.3v", "2.1h", "2.1v", "2.2h",
        "2.2v", "2.3h", "2.3v", "3.1h", "3.1v", "3.2h", "3.2v", "3.3h", "3.3v",
        "3.4h", "3.4v", "4.1h", "4.1v", "4.2h", "4.2v", "4.3h", "4.3v",
    };
@@ -77,8 +77,6 @@ int main(int argc, char* argv[]) {
    tbb::task_scheduler_init scheduler(nrThreads);
    if (q.count("1.1h")) e.timeAndProfile("q1.1 hyper     ", nrTuples(ssb, {"date", "lineorder"}), [&]() { if(clearCaches) clearOsCaches(); auto result = q11_hyper(ssb, nrThreads); escape(&result);}, repetitions);
    if (q.count("1.1v")) e.timeAndProfile("q1.1 vectorwise", nrTuples(ssb, {"date", "lineorder"}), [&]() { if(clearCaches) clearOsCaches(); auto result = q11_vectorwise(ssb, nrThreads, vectorSize); escape(&result);}, repetitions);
-   if (q.count("1.1i")) e.timeAndProfile("q1.1 imv       ", nrTuples(ssb, {"date", "lineorder"}), [&]() { if(clearCaches) clearOsCaches(); auto result = q11_imv(ssb, nrThreads); escape(&result);}, repetitions);
-
    if (q.count("1.2h")) e.timeAndProfile("q1.2 hyper     ", nrTuples(ssb, {"date", "lineorder"}), [&]() { if(clearCaches) clearOsCaches(); auto result = q12_hyper(ssb, nrThreads); escape(&result);}, repetitions);
    if (q.count("1.2v")) e.timeAndProfile("q1.2 vectorwise", nrTuples(ssb, {"date", "lineorder"}), [&]() { if(clearCaches) clearOsCaches(); auto result = q12_vectorwise(ssb, nrThreads, vectorSize); escape(&result);}, repetitions);
    if (q.count("1.3h")) e.timeAndProfile("q1.3 hyper     ", nrTuples(ssb, {"date", "lineorder"}), [&]() { if(clearCaches) clearOsCaches(); auto result = q13_hyper(ssb, nrThreads); escape(&result);}, repetitions);

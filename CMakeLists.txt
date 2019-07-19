@@ -167,7 +167,8 @@ add_library(imv
     src/imv/Pipeline.cpp
     src/imv/HashBuild.cpp
     src/imv/HashAgg.cpp
-    
+    src/imv/HashBuildSSB.cpp
+    src/imv/PipelineSSB.cpp
   )
 target_include_directories(imv PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -241,7 +242,7 @@ target_include_directories(ssb PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
-target_link_libraries(ssb benchmark_config pthread hyper ${TBB_LIBRARIES} vectorwise common)
+target_link_libraries(ssb imv benchmark_config pthread hyper ${TBB_LIBRARIES} vectorwise common)
 
 add_executable(run_ssb
   ${HYPER_TRANSLATORS}
@@ -251,7 +252,7 @@ target_include_directories(run_ssb PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
-target_link_libraries(run_ssb ssb hyper vectorwise common ${JEVENTSLIB})
+target_link_libraries(run_ssb ssb imv hyper vectorwise  common ${JEVENTSLIB})
 
 add_executable(run_prim
   src/benchmarks/primitives/run.cpp
