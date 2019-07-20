@@ -1,4 +1,6 @@
-#include "imv/HashProbe.hpp"
+#pragma once
+
+#include "head.hpp"
 struct __attribute__((aligned(64))) BuildSIMDState {
   __m512i v_entry_addr;
   __m512i v_hash_value;

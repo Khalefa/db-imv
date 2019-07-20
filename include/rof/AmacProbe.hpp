@@ -1,2 +1,4 @@
+#pragma once
+
 #include "head.hpp"
-size_t amac_probe_q11(types::Integer* probe_keys, uint32_t probe_num, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff) {
+size_t amac_probe_q11(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table,uint64_t & results, uint64_t* pos_buff);

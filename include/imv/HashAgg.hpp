@@ -1,5 +1,5 @@
 #pragma once
-#include "imv/HashProbe.hpp"
+#include "head.hpp"
 #define ORDERKEY 0
 
 struct AMACState {

@@ -1,10 +1,11 @@
 #include "rof/AmacBuild.hpp"
 
-size_t amac_build_q11_date(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, Allocator*allo, int entry_size) {
+size_t amac_build_q11_date(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, Allocator*allo, int entry_size, uint64_t* pos_buff) {
   size_t found = 0, cur = begin;
   auto& d = db["date"];
   auto d_datekey = d["d_datekey"].data<types::Integer>();
   int build_key_off = sizeof(runtime::Hashmap::EntryHeader);
+  uint32_t key=0;
   uint8_t done = 0, k = 0;
   BuildState state[stateNum];
 
@@ -21,9 +22,10 @@ size_t amac_build_q11_date(size_t begin, size_t end, Database& db, runtime::Hash
           state[k].stage = 3;
           break;
         }
+        key = d_datekey[pos_buff[cur]].value;
         state[k].ptr = (Hashmap::EntryHeader*) allo->allocate(entry_size);
-        *(int*) (((char*) state[k].ptr) + build_key_off) = d_datekey[cur].value;
-        state[k].hash_value = hash()(d_datekey[cur], primitives::seed);
+        *(int*) (((char*) state[k].ptr) + build_key_off) = key;
+        state[k].hash_value = hash()(key, primitives::seed);
         ++cur;
         state[k].stage = 0;
         hash_table->PrefetchEntry(state[k].hash_value);

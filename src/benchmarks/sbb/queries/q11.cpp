@@ -14,11 +14,16 @@
 #include "vectorwise/VectorAllocator.hpp"
 #include "imv/HashBuildSSB.hpp"
 #include "imv/PipelineSSB.hpp"
+#include "rof/SimdFilter.hpp"
+#include "rof/AmacBuild.hpp"
+#include "rof/AmacProbe.hpp"
+#include "rof/AmacAgg.hpp"
+
 using namespace runtime;
 using namespace std;
 
 namespace ssb {
-
+uint64_t ht_date_size=1024;
 NOVECTORIZE std::unique_ptr<runtime::Query> q11_hyper(Database& db, size_t nrThreads) {
   // --- aggregates
 
@@ -31,7 +36,7 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q11_hyper(Database& db, size_t nrThr
   const auto quantity_max = types::Integer(25);
 
   using hash = runtime::MurMurHash;
-  const size_t morselSize = 100000;
+ // const size_t morselSize = 100000;
 
   // --- ht for join date-lineorder
   Hashset<types::Integer, hash> ht;
@@ -51,6 +56,7 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q11_hyper(Database& db, size_t nrThr
     }
   });
   ht.setSize(found);
+  ht_date_size = found;
   parallel_insert(entries1, ht);
 #if DEBUG
   cout << "q11_hyper build num = " << found << endl;
@@ -75,6 +81,7 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q11_hyper(Database& db, size_t nrThr
           /*  --- aggregation*/
           revenue += extendedprice * discount;
         }
+
       }
     }
     return revenue;
@@ -112,7 +119,7 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q11_imv(Database& db, size_t nrThrea
   Hashset<types::Integer, hash> ht;
 
   auto& d = db["date"];
-  ht.setSize(d.nrTuples);
+  ht.setSize(ht_date_size);
   auto entry_size = sizeof(decltype(ht)::Entry);
   auto found = tbb::parallel_reduce(range(0, d.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
     auto found1 = f;
@@ -148,7 +155,72 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q11_imv(Database& db, size_t nrThrea
   leaveQuery(nrThreads);
   return std::move(resources.query);
 }
+NOVECTORIZE std::unique_ptr<runtime::Query> q11_rof(Database& db, size_t nrThreads) {
+  // --- aggregates
 
+  auto resources = initQuery(nrThreads);
+  const auto relevant_year = types::Integer(1993);
+
+  using hash = runtime::MurMurHash;
+  using range = tbb::blocked_range<size_t>;
+  const auto add = [](const size_t& a, const size_t& b) {return a + b;};
+  const auto numeric_add = [](const types::Numeric<18, 4>& x, const types::Numeric<18, 4>& y) {
+    return x + y;
+  };
+  // --- ht for join date-lineorder
+  Hashset<types::Integer, hash> ht;
+  tbb::enumerable_thread_specific<vector<uint64_t>>position;
+  auto& d = db["date"];
+  ht.setSize(ht_date_size);
+  auto entry_size = sizeof(decltype(ht)::Entry);
+  auto found = tbb::parallel_reduce(range(0, d.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+    auto found1 = f;
+    auto pos_buff = position.local();
+    pos_buff.resize(ROF_VECTOR_SIZE);
+    pos_buff.clear();
+    for (size_t i = r.begin(), size = 0; i < r.end(); ) {
+       size = simd_filter_q11_build_date(i,r.end(),db,&pos_buff[0]);
+       found1 += amac_build_q11_date(0,size,db,&ht,&this_worker->allocator,entry_size, &pos_buff[0]);
+    }
+    return found1;
+  },
+                                    add);
+#if DEBUG
+  cout << "q11_imv build num = " << found << endl;
+#endif
+  // --- lineorder scan -> filter -> probe ->fixAgg
+  auto& lo = db["lineorder"];
+  auto result_revenue = tbb::parallel_reduce(tbb::blocked_range<size_t>(0, lo.nrTuples), types::Numeric<18, 4>(0), [&](const tbb::blocked_range<size_t>& r,
+      const types::Numeric<18, 4>& s) {
+    auto revenue = s;
+    uint64_t res=0;
+    auto pos_buff = position.local();
+    pos_buff.resize(ROF_VECTOR_SIZE);
+    pos_buff.clear();
+    for (size_t i = r.begin(), size = 0; i < r.end(); ) {
+      size = simd_filter_q11_probe(i,r.end(),db,&pos_buff[0]);
+      amac_probe_q11(0,size,db,&ht,res, &pos_buff[0]);
+    }
+    //pipeline_imv_q1x(r.begin(),r.end(),db,&ht,res);
+
+    revenue.value += res;
+    return revenue;
+  },
+                                             numeric_add);
+
+  // --- output
+  auto& result = resources.query->result;
+  auto revAttr = result->addAttribute("revenue", sizeof(types::Numeric<18, 4>));
+  auto block = result->createBlock(1);
+  auto revenue = static_cast<types::Numeric<18, 4>*>(block.data(revAttr));
+  *revenue = result_revenue;
+  block.addedElements(1);
+#if DEBUG
+  cout << "q11_imv results = " << result_revenue << endl;
+#endif
+  leaveQuery(nrThreads);
+  return std::move(resources.query);
+}
 std::unique_ptr<Q11Builder::Q11> Q11Builder::getQuery() {
   using namespace vectorwise;
 

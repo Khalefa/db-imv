@@ -1,5 +1,6 @@
 #pragma once
 #include "common/runtime/Hashmap.hpp"
+#include "common/runtime/Database.hpp"
 #include "vectorwise/Operators.hpp"
 #include <assert.h>
 #include "common/Compat.hpp"
@@ -28,12 +29,13 @@ static int stateNumSIMD = vectorwise::Hashjoin::imvNum;
 
 #define UNLIKELY(expr) __builtin_expect(!!(expr), 0)
 #define LIKELY(expr) __builtin_expect(!!(expr), 1)
+#define DEBUG 0
 using namespace vectorwise;
 using namespace runtime;
 using hash = runtime::MurMurHash;
-using hash_seed =  primitives::seed;
-
 using hash_t = defs::hash_t;
+static hash_t hash_seed =  primitives::seed;
+
 inline void v_prefetch(__m512i& vec){
   uint64_t * ht_pos = (uint64_t*)&vec;
   for (int i = 0; i < VECTORSIZE; ++i) {

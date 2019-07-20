@@ -1,5 +1,5 @@
 #include "rof/SimdFilter.hpp"
-size_t simd_filter_q11_build_date(size_t begin, size_t end, Database& db, uint64_t* pos_buff) {
+size_t simd_filter_q11_build_date(size_t& begin, size_t end, Database& db, uint64_t* pos_buff) {
   size_t found = 0;
   __mmask8 m_valid = -1, m_eval;
   __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_offset;
@@ -30,7 +30,7 @@ size_t simd_filter_q11_build_date(size_t begin, size_t end, Database& db, uint64
   return found;
 }
 
-size_t simd_filter_q11_probe(size_t begin, size_t end, Database& db, uint64_t* pos_buff) {
+size_t simd_filter_q11_probe(size_t& begin, size_t end, Database& db, uint64_t* pos_buff) {
   size_t found = 0;
   __mmask8 m_valid = -1, m_eval;
   __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_offset;
@@ -49,6 +49,7 @@ size_t simd_filter_q11_probe(size_t begin, size_t end, Database& db, uint64_t* p
     if (cur + VECTORSIZE >= end) {
       m_valid = (m_valid >> (cur + VECTORSIZE - end));
     }
+    m_eval = m_valid;
     /////////////////
     // LO_DISCOUNT BETWEEN 1 AND 3
     v_col = _mm512_maskz_loadu_epi64(m_valid,(lo_discount+ cur));

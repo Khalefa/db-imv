@@ -1,5 +1,5 @@
 #include "rof/AmacProbe.hpp"
-size_t amac_probe_q11(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table,uint64_t & results, uint64_t* pos_buff) {
+size_t amac_probe_q11(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, uint64_t & results, uint64_t* pos_buff) {
   size_t found = 0, cur = begin;
   int k = 0, done = 0, keyOff = sizeof(runtime::Hashmap::EntryHeader), buildkey;
   Hashjoin::AMACState amac_state[stateNum];
@@ -31,11 +31,12 @@ size_t amac_probe_q11(size_t begin, size_t end, Database& db, runtime::Hashmap* 
 #endif
         if (pos_buff) {
           probeKey = *(int*) (lo_orderdate + pos_buff[cur]);
+          amac_state[k].tuple_id = pos_buff[cur];
         } else {
           probeKey = *(int*) (lo_orderdate + cur);
+          amac_state[k].tuple_id = cur;
         }
         probeHash = (runtime::MurMurHash()(probeKey, primitives::seed));
-        amac_state[k].tuple_id = cur;
         ++cur;
         amac_state[k].probeKey = probeKey;
         amac_state[k].probeHash = probeHash;
@@ -65,7 +66,7 @@ size_t amac_probe_q11(size_t begin, size_t end, Database& db, runtime::Hashmap* 
           _mm_prefetch((char * )(output_build+pos)+PDIS, _MM_HINT_T0);
           _mm_prefetch((char * )(output_probe+pos)+PDIS + 64, _MM_HINT_T0);
 #endif
-          results += lo_extendedprice[amac_state[k].tuple_id] * lo_discount[amac_state[k].tuple_id];
+          results += lo_extendedprice[amac_state[k].tuple_id].value * lo_discount[amac_state[k].tuple_id].value;
           ++found;
         }
         entry = entry->next;

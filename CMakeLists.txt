@@ -162,6 +162,7 @@ target_include_directories(hyper PUBLIC
     PRIVATE src)
 target_link_libraries(hyper common)
 
+# imv labrary
 add_library(imv
   src/imv/HashProbe.cpp
     src/imv/Pipeline.cpp
@@ -175,6 +176,20 @@ target_include_directories(imv PUBLIC
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
 target_link_libraries(imv common)
+
+# rof labrary
+add_library(rof
+    src/rof/AmacBuild.cpp
+    src/rof/AmacProbe.cpp
+    src/rof/AmacAgg.cpp
+    src/rof/SimdFilter.cpp
+  )
+target_include_directories(rof PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    PRIVATE src)
+target_link_libraries(rof common)
+
 
 file(GLOB PRIMITIVES src/vectorwise/primitives/*.cpp)
 add_library(vectorwise
@@ -242,7 +257,7 @@ target_include_directories(ssb PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
-target_link_libraries(ssb imv benchmark_config pthread hyper ${TBB_LIBRARIES} vectorwise common)
+target_link_libraries(ssb imv rof benchmark_config pthread hyper ${TBB_LIBRARIES} vectorwise common)
 
 add_executable(run_ssb
   ${HYPER_TRANSLATORS}
@@ -252,7 +267,7 @@ target_include_directories(run_ssb PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
-target_link_libraries(run_ssb ssb imv hyper vectorwise  common ${JEVENTSLIB})
+target_link_libraries(run_ssb ssb imv rof hyper vectorwise  common ${JEVENTSLIB})
 
 add_executable(run_prim
   src/benchmarks/primitives/run.cpp
