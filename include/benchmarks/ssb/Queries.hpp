@@ -150,7 +150,9 @@ struct Q21Builder : public vectorwise::QueryBuilder {
        : QueryBuilder(db, shared, size) {}
    std::unique_ptr<Q21> getQuery();
 };
-
+std::unique_ptr<runtime::Query>
+q21_test(runtime::Database& db,
+          size_t nrThreads = std::thread::hardware_concurrency());
 std::unique_ptr<runtime::Query>
 q21_hyper(runtime::Database& db,
           size_t nrThreads = std::thread::hardware_concurrency());

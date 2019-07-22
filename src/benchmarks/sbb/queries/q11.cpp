@@ -201,8 +201,6 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q11_rof(Database& db, size_t nrThrea
       size = simd_filter_q11_probe(i,r.end(),db,&pos_buff[0]);
       amac_probe_q11(0,size,db,&ht,res, &pos_buff[0]);
     }
-    //pipeline_imv_q1x(r.begin(),r.end(),db,&ht,res);
-
     revenue.value += res;
     return revenue;
   },

@@ -8,7 +8,7 @@ size_t build_raw(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_
   for (size_t i = begin; i < end; ++i) {
     Hashmap::EntryHeader* ptr = (Hashmap::EntryHeader*) allo->allocate(entry_size);
     *(int*) (((char*) ptr) + build_key_off) = o_orderkey[i].value;
-    hash_t hash_value = hash()(o_orderkey[i], primitives::seed);
+    hash_t hash_value = hashFun()(o_orderkey[i], primitives::seed);
     //auto head= ht1.entries+ptr->h.hash;
     hash_table->insert_tagged(ptr, hash_value);
     ++found;
@@ -28,7 +28,7 @@ size_t build_gp(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_t
     for (k = 0; (k < stateNum) && (cur < end); ++k, ++cur) {
       state[k].ptr = (Hashmap::EntryHeader*) allo->allocate(entry_size);
       *(int*) (((char*) state[k].ptr) + build_key_off) = o_orderkey[cur].value;
-      state[k].hash_value = hash()(o_orderkey[cur], primitives::seed);
+      state[k].hash_value = hashFun()(o_orderkey[cur], primitives::seed);
       hash_table->PrefetchEntry(state[k].hash_value);
     }
     stage2_num = k;
@@ -63,7 +63,7 @@ size_t build_amac(size_t begin, size_t end, Database& db, runtime::Hashmap* hash
         }
         state[k].ptr = (Hashmap::EntryHeader*) allo->allocate(entry_size);
         *(int*) (((char*) state[k].ptr) + build_key_off) = o_orderkey[cur].value;
-        state[k].hash_value = hash()(o_orderkey[cur], primitives::seed);
+        state[k].hash_value = hashFun()(o_orderkey[cur], primitives::seed);
         ++cur;
         state[k].stage = 0;
         hash_table->PrefetchEntry(state[k].hash_value);

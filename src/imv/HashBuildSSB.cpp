@@ -41,7 +41,6 @@ size_t build_imv_q1x(size_t begin, size_t end, Database& db, runtime::Hashmap* h
         break;
       }
     }
-    /// TODO: add a stage to do filter
     switch (state[k].stage) {
       case 1: {
         /// step 1: gather build keys (using gather to compilate with loading discontinuous values)

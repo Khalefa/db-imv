@@ -1,6 +1,6 @@
 #include <deque>
 #include <iostream>
-
+#include "head.hpp"
 #include "benchmarks/ssb/Queries.hpp"
 #include "common/runtime/Hash.hpp"
 #include "common/runtime/Types.hpp"
@@ -12,6 +12,7 @@
 #include "vectorwise/Primitives.hpp"
 #include "vectorwise/QueryBuilder.hpp"
 #include "vectorwise/VectorAllocator.hpp"
+#include "imv/HashProbe.hpp"
 
 using namespace runtime;
 using namespace std;
@@ -43,6 +44,108 @@ namespace ssb {
 //                    tablescan tablescan
 //                    part      lineorder
 
+NOVECTORIZE std::unique_ptr<runtime::Query> q21_test(Database& db,
+                                                      size_t nrThreads) {
+   // --- aggregates
+   auto resources = initQuery(nrThreads);
+
+   // --- constants
+   auto relevant_category = types::Integer(12);
+   auto relevant_region = db.modify.get_id(string("AMERICA"));
+
+  // const size_t morselSize = 100000;
+
+   // --- ht for join date-lineorder
+   Hashmapx<types::Integer, types::Integer, hashFun> ht1;
+   tbb::enumerable_thread_specific<runtime::Stack<decltype(ht1)::Entry>>
+       entries1;
+   auto& d = db["date"];
+   auto d_year = d["d_year"].data<types::Integer>();
+   auto d_datekey = d["d_datekey"].data<types::Integer>();
+   PARALLEL_SCAN(d.nrTuples, entries1, {
+      auto& year = d_year[i];
+      auto& datekey = d_datekey[i];
+      entries.emplace_back(ht1.hash(datekey), datekey, year);
+   });
+   ht1.setSize(d.nrTuples);
+   parallel_insert(entries1, ht1);
+
+   // --- ht for join supplier-lineorder
+   Hashset<types::Integer, hashFun> ht2;
+   tbb::enumerable_thread_specific<runtime::Stack<decltype(ht2)::Entry>>
+       entries2;
+   auto& su = db["supplier"];
+   auto s_suppkey = su["s_suppkey"].data<types::Integer>();
+   auto s_region = db.modify.get_addr("s_region"); //su["s_region"].data<types::Char<12>>();
+   // do selection on part and put selected elements into ht2
+   auto found2 = PARALLEL_SELECT(su.nrTuples, entries2, {
+      auto& suppkey = s_suppkey[i];
+      auto& region = s_region[i];
+#if 0
+      if (region == relevant_region) {
+#else
+        if(true){
+#endif
+        entries.emplace_back(ht2.hash(suppkey), suppkey);
+         found++;
+      }
+   });
+   ht2.setSize(found2);
+   parallel_insert(entries2, ht2);
+
+   // --- ht for join part-lineorder
+   Hashmapx<types::Integer, types::Integer, hashFun> ht3;
+   tbb::enumerable_thread_specific<runtime::Stack<decltype(ht3)::Entry>>
+       entries3;
+   auto& p = db["part"];
+   auto p_partkey = p["p_partkey"].data<types::Integer>();
+   auto p_category = p["p_category"].data<types::Integer>();
+   auto p_brand1 = p["p_brand1"].data<types::Integer>();
+   auto found3 = PARALLEL_SELECT(p.nrTuples, entries3, {
+      auto& partkey = p_partkey[i];
+      auto& category = p_category[i];
+      auto& brand1 = p_brand1[i];
+#if 0
+      if (category == relevant_category) {
+#else
+         if(true){
+#endif
+        entries.emplace_back(ht3.hash(partkey), partkey, brand1);
+         found++;
+      }
+   });
+   ht3.setSize(found3);
+   parallel_insert(entries3, ht3);
+
+   // --- scan and join lineorder
+   auto& lo = db["lineorder"];
+   auto lo_orderdate = lo["lo_orderdate"].data<types::Integer>();
+   auto lo_partkey = lo["lo_partkey"].data<types::Integer>();
+   auto lo_suppkey = lo["lo_suppkey"].data<types::Integer>();
+   auto lo_revenue = lo["lo_revenue"].data<types::Numeric<18, 2>>();
+   using range = tbb::blocked_range<size_t>;
+
+   vector<Hashmap*>hash_table;
+   hash_table.push_back(&ht1);
+   hash_table.push_back(&ht2);
+   hash_table.push_back(&ht3);
+   const auto add = [](const size_t& a, const size_t& b) {return a + b;};
+
+   cout<<"ht1 num = "<<d.nrTuples<<"\t ht2 num = "<<found2<<"\t ht3 num = "<< found3<<endl;
+   ht1.printSta();
+   ht2.printSta();
+   ht3.printSta();
+   auto found = tbb::parallel_reduce(range(0, lo.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+     auto found1 = f;
+     found1 +=star_probe(r.begin(),r.end(),db,&hash_table[0],hash_table.size());
+     return found1;
+   },
+                                     add);
+
+   cout<<"star probe num = "<< found<<endl;
+   leaveQuery(nrThreads);
+   return move(resources.query);
+}
 NOVECTORIZE std::unique_ptr<runtime::Query> q21_hyper(Database& db,
                                                       size_t nrThreads) {
    // --- aggregates

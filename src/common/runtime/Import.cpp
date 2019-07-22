@@ -571,5 +571,6 @@ void importSSB_modified(std::string dir, Database& db) {
                    {"d_weekdayfl", make_unique<algebra::Integer>()}});
       parseColumns(rel, columns, dir, rel.name);
    }
+   db.modifyDB();
 }
 } // namespace runtime

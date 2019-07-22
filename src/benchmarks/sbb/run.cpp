@@ -76,6 +76,9 @@ int main(int argc, char* argv[]) {
 
    tbb::task_scheduler_init scheduler(nrThreads);
 
+
+   if (q.count("2.1h")) e.timeAndProfile("q2.1 hyper     ", nrTuples(ssb, {"date", "lineorder", "supplier", "part"}), [&]() { if(clearCaches) clearOsCaches(); auto result = q21_test(ssb, nrThreads); escape(&result);}, repetitions);
+   return 0;
    if (q.count("1.1h")) e.timeAndProfile("q1.1 hyper     ", nrTuples(ssb, {"date", "lineorder"}), [&]() { if(clearCaches) clearOsCaches(); auto result = q11_hyper(ssb, nrThreads); escape(&result);}, repetitions);
    if (q.count("1.1v")) e.timeAndProfile("q1.1 vectorwise", nrTuples(ssb, {"date", "lineorder"}), [&]() { if(clearCaches) clearOsCaches(); auto result = q11_vectorwise(ssb, nrThreads, vectorSize); escape(&result);}, repetitions);
    if (q.count("1.1i")) e.timeAndProfile("q1.1 imv       ", nrTuples(ssb, {"date", "lineorder"}), [&]() { if(clearCaches) clearOsCaches(); auto result = q11_imv(ssb, nrThreads); escape(&result);}, repetitions);

@@ -32,7 +32,8 @@ static int stateNumSIMD = vectorwise::Hashjoin::imvNum;
 #define DEBUG 0
 using namespace vectorwise;
 using namespace runtime;
-using hash = runtime::MurMurHash;
+using namespace std;
+using hashFun = runtime::MurMurHash;
 using hash_t = defs::hash_t;
 static hash_t hash_seed =  primitives::seed;
 

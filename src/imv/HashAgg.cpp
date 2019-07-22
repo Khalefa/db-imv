@@ -2,7 +2,7 @@
 int agg_constrant = 50;
 std::map<uint64_t, uint64_t> match_counts, bucket_counts, end_counts;
 
-size_t agg_raw(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>* hash_table, PartitionedDeque<1024>* partition,
+size_t agg_raw(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table, PartitionedDeque<1024>* partition,
                void** entry_addrs, void** results_entry) {
   size_t found = 0;
   auto& li = db["lineitem"];
@@ -12,13 +12,13 @@ size_t agg_raw(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, 
   auto l_orderkey = li["l_suppkey"].data<types::Integer>();
 #endif
   auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
-  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>::Entry;
+  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>::Entry;
   hash_t hash_value;
   group_t* entry = nullptr, *old_entry = nullptr;
 
   for (size_t cur = begin; cur < end; ++cur) {
     if (nullptr == entry_addrs) {
-      hash_value = hash()(l_orderkey[cur], primitives::seed);
+      hash_value =  hashFun()(l_orderkey[cur], primitives::seed);
       entry = hash_table->findOneEntry(l_orderkey[cur], hash_value);
       if (!entry) {
         entry = (group_t*) partition->partition_allocate(hash_value);
@@ -45,7 +45,7 @@ size_t agg_raw(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, 
   return found;
 }
 
-size_t agg_amac(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>* hash_table, PartitionedDeque<1024>* partition,
+size_t agg_amac(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table, PartitionedDeque<1024>* partition,
                 void** entry_addrs, void** results_entry) {
   size_t found = 0, pos = 0, cur = begin;
   int k = 0, done = 0, buildkey, probeKey;
@@ -59,7 +59,7 @@ size_t agg_amac(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
 #endif
 
   auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
-  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>::Entry;
+  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>::Entry;
   group_t* entry = nullptr, *old_entry = nullptr;
 
   // initialization
@@ -169,7 +169,7 @@ size_t agg_amac(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
   return found;
 
 }
-size_t agg_gp(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>* hash_table, PartitionedDeque<1024>* partition,
+size_t agg_gp(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table, PartitionedDeque<1024>* partition,
               void** entry_addrs, void** results_entry) {
   size_t found = 0, pos = 0, cur = begin;
   int k = 0, done = 0, keyOff = sizeof(runtime::Hashmap::EntryHeader), buildkey, probeKey, valid_size;
@@ -182,7 +182,7 @@ size_t agg_gp(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, t
   auto l_orderkey = li["l_suppkey"].data<types::Integer>();
 #endif
   auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
-  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>::Entry;
+  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>::Entry;
   group_t* entry = nullptr, *old_entry = nullptr;
 
   auto insetNewEntry = [&](AMACState& state) {
@@ -286,7 +286,7 @@ size_t agg_gp(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, t
   }
   return found;
 }
-size_t agg_simd(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>* hash_table, PartitionedDeque<1024>* partition,
+size_t agg_simd(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table, PartitionedDeque<1024>* partition,
                 void** entry_addrs, void** results_entry) {
   size_t found = 0, pos = 0, cur = begin;
   int k = 0, done = 0, buildkey, probeKey, valid_size;
@@ -299,7 +299,7 @@ size_t agg_simd(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
   auto l_orderkey = li["l_suppkey"].data<types::Integer>();
 #endif
   auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
-  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>::Entry;
+  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>::Entry;
   __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_zero = _mm512_set1_epi64(0);
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(end - begin), v_seed = _mm512_set1_epi64(vectorwise::primitives::seed), v_all_ones =
       _mm512_set1_epi64(-1), v_conflict, v_ht_keys, v_hash_mask, v_ht_value, v_next;
@@ -420,7 +420,7 @@ size_t agg_simd(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
 
   return found;
 }
-size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>* hash_table, PartitionedDeque<1024>* partition,
+size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table, PartitionedDeque<1024>* partition,
                       void** entry_addrs, void** results_entry) {
   size_t found = 0, pos = 0, cur = begin;
   int k = 0, done = 0, buildkey, probeKey, valid_size, imvNum = vectorwise::Hashjoin::imvNum, imvNum1 = vectorwise::Hashjoin::imvNum + 1;
@@ -433,7 +433,7 @@ size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::In
   auto l_orderkey = li["l_suppkey"].data<types::Integer>();
 #endif
   auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
-  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>::Entry;
+  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>::Entry;
   __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_zero = _mm512_set1_epi64(0);
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(end - begin), v_seed = _mm512_set1_epi64(vectorwise::primitives::seed), v_all_ones =
       _mm512_set1_epi64(-1), v_conflict, v_ht_keys, v_hash_mask, v_ht_value, v_next;
@@ -669,7 +669,7 @@ size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::In
 
   return found;
 }
-size_t agg_imv(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>* hash_table, PartitionedDeque<1024>* partition,
+size_t agg_imv(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table, PartitionedDeque<1024>* partition,
                void** entry_addrs, void** results_entry) {
   size_t found = 0, pos = 0, cur = begin;
   int k = 0, done = 0, buildkey, probeKey, valid_size, imvNum = vectorwise::Hashjoin::imvNum, imvNum1 = vectorwise::Hashjoin::imvNum + 1;
@@ -682,7 +682,7 @@ size_t agg_imv(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, 
   auto l_orderkey = li["l_suppkey"].data<types::Integer>();
 #endif
   auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
-  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>::Entry;
+  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>::Entry;
   __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_zero = _mm512_set1_epi64(0), v_lzeros, v_63 = _mm512_set1_epi64(63);
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(end - begin), v_seed = _mm512_set1_epi64(vectorwise::primitives::seed), v_all_ones =
       _mm512_set1_epi64(-1), v_conflict, v_ht_keys, v_hash_mask, v_ht_value, v_next;
@@ -935,7 +935,7 @@ size_t agg_imv(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, 
 
   return found;
 }
-size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>* hash_table, PartitionedDeque<1024>* partition,
+size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table, PartitionedDeque<1024>* partition,
                       void** entry_addrs, void** results_entry) {
   size_t found = 0, pos = 0, cur = begin;
   int k = 0, done = 0, buildkey, probeKey, valid_size, imvNum = vectorwise::Hashjoin::imvNum, imvNum1 = vectorwise::Hashjoin::imvNum + 1;
@@ -948,7 +948,7 @@ size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::In
   auto l_orderkey = li["l_suppkey"].data<types::Integer>();
 #endif
   auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
-  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hash, false>::Entry;
+  using group_t = Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>::Entry;
   __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_zero = _mm512_set1_epi64(0), v_lzeros, v_63 = _mm512_set1_epi64(63);
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(end - begin), v_seed = _mm512_set1_epi64(vectorwise::primitives::seed), v_all_ones =
       _mm512_set1_epi64(-1), v_conflict, v_ht_keys, v_hash_mask, v_ht_value, v_next, v_previous;
