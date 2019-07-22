@@ -677,6 +677,7 @@ size_t star_probe_amac(size_t begin, size_t end, Database& db, runtime::Hashmap*
 
   return found;
 }
+/*
 struct SIMDStateStar {
   __m512i v_bucket_addrs;
   __m512i v_probe_keys;
@@ -685,7 +686,7 @@ struct SIMDStateStar {
   __m512i v_ht_id;
   uint8_t stage, m_valid;
   SIMDStateStar()
-      : state(1),
+      : stage(1),
         m_valid(0),
         v_ht_id(_mm512_set1_epi64(0)) {
 
@@ -808,3 +809,4 @@ size_t star_probe_simd(size_t begin, size_t end, Database& db, runtime::Hashmap*
   return found;
 }
 
+*/

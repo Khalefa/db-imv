@@ -429,32 +429,7 @@ pos_t Hashjoin::joinAMAC() {
   while (amac_cont.done < stateNum) {
     amac_cont.k = (amac_cont.k >= stateNum) ? 0 : amac_cont.k;
     switch (amac_state[amac_cont.k].stage) {
-#if 0
-      case 1: {
-        if(cont.nextProbe>=cont.numProbes) {
-          ++amac_cont.done;
-          amac_state[amac_cont.k].stage=3;
-          //   std::cout<<"amac done one "<<cont.numProbes<<" , "<<cont.nextProbe<<std::endl;
-          break;
-        }
-        cont.probeKey =probeKeys[cont.nextProbe];
-        cont.probeHash =(runtime::MurMurHash()(cont.probeKey,primitives::seed));
-        // prefetch the address of the beginning hash buckets
-        //shared.ht.prefetchEntry(cont.probeHash);
-        // suppose the hashEngtries reside in the cache
-        amac_state[amac_cont.k].buildMatch=shared.ht.find_chain_tagged(cont.probeHash);
-        amac_state[amac_cont.k].tuple_id = cont.nextProbe;
-        ++cont.nextProbe;
-        if(nullptr==amac_state[amac_cont.k].buildMatch) {
-          --amac_cont.k;
-          break;
-        }
-        amac_state[amac_cont.k].probeKey=cont.probeKey;
-        amac_state[amac_cont.k].stage=0;
-        _mm_prefetch((char *)(amac_state[amac_cont.k].buildMatch), _MM_HINT_T0);
-        _mm_prefetch((char *)(amac_state[amac_cont.k].buildMatch)+64, _MM_HINT_T0);
-      }break;
-#else
+
       case 1: {
         if (cont.nextProbe >= cont.numProbes) {
           ++amac_cont.done;
@@ -468,7 +443,7 @@ pos_t Hashjoin::joinAMAC() {
         ++cont.nextProbe;
         amac_state[amac_cont.k].probeKey = cont.probeKey;
         amac_state[amac_cont.k].probeHash = cont.probeHash;
-        _mm_prefetch((char * )(shared.ht.entries + cont.probeHash), _MM_HINT_T0);
+        shared.ht.PrefetchEntry(cont.probeHash);
         amac_state[amac_cont.k].stage = 2;
       }
         break;
@@ -484,7 +459,6 @@ pos_t Hashjoin::joinAMAC() {
         }
       }
         break;
-#endif
       case 0: {
         auto entry = amac_state[amac_cont.k].buildMatch;
         if (nullptr == entry) {
@@ -1216,8 +1190,7 @@ pos_t Hashjoin::joinBoncz() {
    contCon.followupWrite = followupWrite;
    return 0;
 }
-#define JOINROW 10
-#define JOINAMAC 10
+
 size_t Hashjoin::next() {
    using runtime::Hashmap;
    // --- build
