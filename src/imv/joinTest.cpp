@@ -521,10 +521,10 @@ bool join_hyper(Database& db, size_t nrThreads) {
   return true;
 }
 
+auto pipeline_date = types::Date::castString("1996-01-01");
 bool pipeline(Database& db, size_t nrThreads) {
 
   auto resources = initQuery(nrThreads);
-  auto c1 = types::Date::castString("1996-01-01");
   auto c2 = types::Numeric<12, 2>::castString("0.07");
   auto c3 = types::Integer(24);
 
@@ -548,7 +548,7 @@ bool pipeline(Database& db, size_t nrThreads) {
     auto found = f;
     auto& entries = entries1.local();
     for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
-      if(o_orderdate[i] >= c1) {
+      if(o_orderdate[i] < pipeline_date) {
         entries.emplace_back(ht1.hash(o_orderkey[i]), o_orderkey[i]);
         found++;
       }
@@ -618,19 +618,45 @@ bool pipeline(Database& db, size_t nrThreads) {
   return true;
 }
 
+types::Numeric<12, 2> pipeline_num = types::Numeric<12, 2>(types::Integer(2400));
+
 std::unique_ptr<Q3Builder::Q3> Q3Builder::getQuery() {
   using namespace vectorwise;
   auto result = Result();
   previous = result.resultWriter.shared.result->participate();
   auto r = make_unique<Q3>();
-
+#if JOINALL
   auto order = Scan("orders");
   auto lineitem = Scan("lineitem");
 
   HashJoin(Buffer(cust_ord, sizeof(pos_t)), vectorJoinFun).  //
       addBuildKey(Column(order, "o_orderkey"), conf.hash_int32_t_col(), primitives::scatter_int32_t_col).  //
       addProbeKey(Column(lineitem, "l_orderkey"), conf.hash_int32_t_col(), primitives::keys_equal_int32_t_col);
+#else
+  // JOIN SEL
 
+  auto order = Scan("orders");
+  //  o_orderdate < date '"1996-01-01"
+  Select(Expression().addOp(BF(primitives::sel_less_Date_col_Date_val),//
+          Buffer(sel_order, sizeof(pos_t)),//
+          Column(order, "o_orderdate"),//
+          Value(&pipeline_date)));
+  ///////////NOTE the order
+  auto lineitem = Scan("lineitem");
+
+  // l_quantity < 24
+  Select((Expression()//
+          .addOp(BF(vectorwise::primitives::sel_less_int64_t_col_int64_t_val),//
+              Buffer(sel_cust, sizeof(pos_t)),//
+              Column(lineitem, "l_quantity"),//
+              Value(&pipeline_num))));
+
+  HashJoin(Buffer(cust_ord, sizeof(pos_t)), vectorJoinFun)//
+  .setProbeSelVector(Buffer(sel_cust), vectorJoinFun).addBuildKey(Column(order, "o_orderkey"), Buffer(sel_order), conf.hash_sel_int32_t_col(),
+      primitives::scatter_sel_int32_t_col)//
+  .addProbeKey(Column(lineitem, "l_orderkey"), Buffer(sel_cust), conf.hash_sel_int32_t_col(), primitives::keys_equal_int32_t_col);
+
+#endif
 // count(*)
   FixedAggregation(Expression().addOp(primitives::aggr_static_count_star, Value(&r->count)));
 
@@ -662,6 +688,11 @@ bool join_vectorwise(Database& db, size_t nrThreads, size_t vectorSize) {
               }
 #endif
             });
+    for (int i = 1; i < workers.pipeline_cost_time.size(); ++i) {
+      double run_time = workers.pipeline_cost_time[i].second - workers.pipeline_cost_time[i - 1].second;
+      cout << workers.pipeline_cost_time[i].first << " cost time = " << run_time * 1e3 << std::endl;
+    }
+
   return true;
 }
 
@@ -683,6 +714,22 @@ void test_vectorwise_probe(Database& db, size_t nrThreads) {
   vectorName2fun.push_back(make_pair("joinFullSIMD", &vectorwise::Hashjoin::joinFullSIMD));
   vectorName2fun.push_back(make_pair("joinSIMDAMAC", &vectorwise::Hashjoin::joinSIMDAMAC));
   vectorName2fun.push_back(make_pair("joinIMV", &vectorwise::Hashjoin::joinIMV));
+
+  for (auto name2fun : vectorName2fun) {
+    vectorJoinFun = name2fun.second;
+    e.timeAndProfile(name2fun.first, nrTuples(db, { "orders", "lineitem" }), [&]() {
+      join_vectorwise(db,nrThreads,vectorSize);
+    },
+                     repetitions);
+  }
+}
+void test_vectorwise_sel_probe(Database& db, size_t nrThreads) {
+  PerfEvents e;
+  size_t vectorSize = 1024;
+  vector<pair<string, decltype(vectorJoinFun)> > vectorName2fun;
+  vectorName2fun.push_back(make_pair("joinAllSIMD", &vectorwise::Hashjoin::joinSelSIMD));
+  vectorName2fun.push_back(make_pair("joinAllParallel", &vectorwise::Hashjoin::joinSelParallel));
+  vectorName2fun.push_back(make_pair("joinIMV", &vectorwise::Hashjoin::joinSelIMV));
 
   for (auto name2fun : vectorName2fun) {
     vectorJoinFun = name2fun.second;
@@ -714,12 +761,13 @@ int main(int argc, char* argv[]) {
 
   tbb::task_scheduler_init scheduler(nrThreads);
 
-// pipeline(tpch, nrThreads);
+ pipeline(tpch, nrThreads);
 //   join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
   //test_agg(tpch, nrThreads);
 
-  test_vectorwise_probe(tpch, nrThreads);
+ // test_vectorwise_probe(tpch, nrThreads);
+  test_vectorwise_sel_probe(tpch, nrThreads);
   scheduler.terminate();
   return 0;
 }

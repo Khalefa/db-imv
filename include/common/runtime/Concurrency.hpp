@@ -49,6 +49,7 @@ class Worker
    };
    explicit Worker() {}
    // void join() { t->join(); }
+   void log_time(std::string pipeline_name);
 
  private:
    std::function<void()> function;
@@ -62,6 +63,8 @@ class WorkerGroup
  public:
    std::deque<Barrier> barriers;
    size_t size = std::thread::hardware_concurrency();
+   std::vector<std::pair<std::string,double>>pipeline_cost_time;
+   Worker* main_worker =nullptr;
    WorkerGroup(WorkerGroup&) = delete;
    WorkerGroup() {
       barriers.emplace_back(size);
@@ -112,8 +115,11 @@ inline void WorkerGroup::run(std::function<void()> f) {
    auto prevBarrierPtr = this_worker->barrier;
    this_worker->group = this;
    this_worker->barrier = barriers.back();
+   this->main_worker = this_worker;
+   this_worker->log_time("start");
    currentBarrier = 0;
    f();
+   this_worker->log_time("end");
    this_worker->group = prevGroup;
    currentBarrier = prevBarrier;
    this_worker->barrier = prevBarrierPtr;

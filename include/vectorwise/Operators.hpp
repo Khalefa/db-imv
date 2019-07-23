@@ -343,6 +343,7 @@ class Hashjoin : public BinaryOperator {
    pos_t joinFullSIMD();
    pos_t joinSIMDAMAC();
    pos_t joinIMV();
+   pos_t joinSelIMV();
    virtual size_t next() override;
    ~Hashjoin();
 };
