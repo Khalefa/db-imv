@@ -618,7 +618,7 @@ bool pipeline(Database& db, size_t nrThreads) {
   return true;
 }
 
-types::Numeric<12, 2> pipeline_num = types::Numeric<12, 2>(types::Integer(2400));
+types::Numeric<12, 2> pipeline_num = types::Numeric<12, 2>(types::Integer(24));
 
 std::unique_ptr<Q3Builder::Q3> Q3Builder::getQuery() {
   using namespace vectorwise;

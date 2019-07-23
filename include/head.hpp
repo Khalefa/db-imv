@@ -21,7 +21,7 @@
 #define ROF_VECTOR_SIZE 10000
 #define PDIS 2048
 #define PDISD 72
-
+#define EARLY_BREAK 1
 #define SEQ_PREFETCH 0
 #define WRITE_SEQ_PREFETCH 0
 static int stateNum = vectorwise::Hashjoin::stateNum;

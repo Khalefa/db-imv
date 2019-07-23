@@ -1,5 +1,5 @@
 #include "imv/Pipeline.hpp"
-auto c3 = types::Integer(2400);
+auto c3 = types::Integer(24);
 uint64_t constrants = c3.value*100;
 size_t scan_filter_simd(types::Numeric<12, 2>* col, size_t& begin, size_t end, int constrants, uint64_t* pos_buff) {
   size_t found = 0;
@@ -76,6 +76,9 @@ size_t filter_probe_scalar(size_t begin, size_t end, Database& db, runtime::Hash
           output_probe[pos] = (i);
           ++found;
           ++pos;
+#if EARLY_BREAK
+          break;
+#endif
         }
       }
     }
@@ -254,6 +257,9 @@ size_t filter_probe_imv1(size_t begin, size_t end, Database& db, runtime::Hashma
         _mm256_mask_compressstoreu_epi32((output_probe + pos), m_match, _mm512_cvtepi64_epi32(imv_state[k].v_probe_offset));
         pos += _mm_popcnt_u32(m_match);
         found += _mm_popcnt_u32(m_match);
+#if EARLY_BREAK
+        imv_state[k].m_valid_probe = _mm512_kandn(m_match,imv_state[k].m_valid_probe);
+#endif
         /// step 7: move to the next bucket nodes
         imv_state[k].v_bucket_addrs = _mm512_mask_i64gather_epi64(v_zero, imv_state[k].m_valid_probe, imv_state[k].v_bucket_addrs, nullptr, 1);
         imv_state[k].m_valid_probe = _mm512_kand(imv_state[k].m_valid_probe, _mm512_cmpneq_epi64_mask(imv_state[k].v_bucket_addrs, v_zero));
@@ -461,6 +467,9 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
         _mm256_mask_compressstoreu_epi32((output_probe + pos), m_match, _mm512_cvtepi64_epi32(imv_state[k].v_probe_offset));
         pos += _mm_popcnt_u32(m_match);
         found += _mm_popcnt_u32(m_match);
+#if EARLY_BREAK
+        imv_state[k].m_valid_probe = _mm512_kandn(m_match,imv_state[k].m_valid_probe);
+#endif
         /// step 7: move to the next bucket nodes
         imv_state[k].v_bucket_addrs = _mm512_mask_i64gather_epi64(v_zero, imv_state[k].m_valid_probe, imv_state[k].v_bucket_addrs, nullptr, 1);
         imv_state[k].m_valid_probe = _mm512_kand(imv_state[k].m_valid_probe, _mm512_cmpneq_epi64_mask(imv_state[k].v_bucket_addrs, v_zero));
