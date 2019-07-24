@@ -19,11 +19,13 @@
 #include "common/defs.hpp"
 #define VECTORSIZE 8
 #define ROF_VECTOR_SIZE 10000
-#define PDIS 2048
-#define PDISD 72
+#define PDIS 320
+#define PDISD 32
 #define EARLY_BREAK 1
-#define SEQ_PREFETCH 0
+#define SEQ_PREFETCH 1
 #define WRITE_SEQ_PREFETCH 0
+#define WRITE_RESULTS 1
+#define WRITE_PDIS 0
 static int stateNum = vectorwise::Hashjoin::stateNum;
 static int stateNumSIMD = vectorwise::Hashjoin::imvNum;
 

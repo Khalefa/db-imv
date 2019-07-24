@@ -89,7 +89,7 @@ inline void WorkerGroup::run(std::function<void()> f) {
       auto worker = &threads.back();
       g.run([worker, i]() {
 
-#ifndef __APPLE__
+#ifdef __APPLE__
          pthread_t currentThread = pthread_self();
          pthread_setname_np(currentThread,
                             ("workerPool " + std::to_string(i)).c_str());
@@ -103,7 +103,7 @@ inline void WorkerGroup::run(std::function<void()> f) {
                                      std::to_string(i));
          }
 #else
-         compat::unused(i);
+       //  compat::unused(i);
 #endif
          worker->start();
       });

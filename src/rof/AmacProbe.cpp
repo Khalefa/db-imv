@@ -26,8 +26,8 @@ size_t amac_probe_q11(size_t begin, size_t end, Database& db, runtime::Hashmap* 
           break;
         }
 #if SEQ_PREFETCH
-        _mm_prefetch((char*)(probe_keys+cur)+PDIS,_MM_HINT_T0);
-        _mm_prefetch(((char*)(probe_keys+cur)+PDIS+64),_MM_HINT_T0);
+//        _mm_prefetch((char*)(lo_orderdate+cur)+PDIS,_MM_HINT_T0);
+//        _mm_prefetch(((char*)(lo_orderdate+cur)+PDIS+64),_MM_HINT_T0);
 #endif
         if (pos_buff) {
           probeKey = *(int*) (lo_orderdate + pos_buff[cur]);
@@ -63,8 +63,8 @@ size_t amac_probe_q11(size_t begin, size_t end, Database& db, runtime::Hashmap* 
         buildkey = *((addBytes((reinterpret_cast<int*>(entry)), keyOff)));
         if ((buildkey == amac_state[k].probeKey)) {
 #if WRITE_SEQ_PREFETCH
-          _mm_prefetch((char * )(output_build+pos)+PDIS, _MM_HINT_T0);
-          _mm_prefetch((char * )(output_probe+pos)+PDIS + 64, _MM_HINT_T0);
+//          _mm_prefetch((char * )(output_build+pos)+PDIS, _MM_HINT_T0);
+//          _mm_prefetch((char * )(output_probe+pos)+PDIS + 64, _MM_HINT_T0);
 #endif
           results += lo_extendedprice[amac_state[k].tuple_id].value * lo_discount[amac_state[k].tuple_id].value;
           ++found;

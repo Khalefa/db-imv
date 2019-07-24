@@ -94,8 +94,7 @@ size_t pipeline_imv_q1x(size_t begin, size_t end, Database& db, runtime::Hashmap
 #if SEQ_PREFETCH
         _mm_prefetch((((char* )(probe_keys+nextProbe))+PDIS), _MM_HINT_T0);
         _mm_prefetch((((char* )(probe_keys+nextProbe))+PDIS+64), _MM_HINT_T0);
-        _mm_prefetch((((char* )(l_quantity_col+nextProbe))+PDIS), _MM_HINT_T0);
-        _mm_prefetch((((char* )(l_quantity_col+nextProbe))+PDIS+64), _MM_HINT_T0);
+
 #endif
         /// step 1: load the offsets of probing tuples
         imv_state[k].v_probe_offset = _mm512_add_epi64(_mm512_set1_epi64(nextProbe), v_base_offset);
