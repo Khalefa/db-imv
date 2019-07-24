@@ -521,7 +521,7 @@ repetitions);
       return true;
     }
 
-bool probe_test(Database& db, size_t nrThreads)
+    bool probe_test(Database& db, size_t nrThreads)
 {
 
   auto resources = initQuery(nrThreads);
@@ -558,290 +558,294 @@ bool probe_test(Database& db, size_t nrThreads)
                                  return found;
                                },
                                      add);
+                                     ht1.setSize(found1);
+                                     parallel_insert(entries1, ht1);
+                                     cout << "Build hash table tuples num = " << found1 << endl;
+                                     ht1.printSta();
+                                     uint32_t probe_off[morselSize];
+                                     void* build_add[morselSize];
+
+                                     vector<pair<string, decltype(compilerjoinFun)> > compilerName2fun;
+                                     compilerName2fun.push_back(make_pair("probe_row", probe_row));
+//  compilerName2fun.push_back(make_pair("probe_simd", probe_simd));
+                                     compilerName2fun.push_back(make_pair("probe_amac", probe_amac));
+                                     compilerName2fun.push_back(make_pair("probe_gp", probe_gp));
+//  compilerName2fun.push_back(make_pair("probe_simd_amac", probe_simd_amac));
+                                     compilerName2fun.push_back(make_pair("probe_imv", probe_imv));
+                                     PerfEvents event;
+                                     uint64_t found2 = 0;
+                                     for (auto name2fun : compilerName2fun) {
+                                       compilerjoinFun = name2fun.second;
+
+                                       event.timeAndProfile(name2fun.first, 10000, [&]() {
+                                         found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+                                               auto found = f;
+                                               found+=compilerjoinFun(l_orderkey+r.begin(),r.size(),&ht1,build_add,probe_off, nullptr);
+                                               return found;
+                                             },
+                                             add);
+                                       },
+                                       repetitions);
+#if RESULTS
+                                     cout << "hyper join results :" << found2 << endl;
+#endif
+                                   }
+                                   leaveQuery(nrThreads);
+
+                                   return true;
+                                 }
+
+                                 auto pipeline_date = types::Date::castString("1996-01-01")
+;
+bool pipeline(Database& db, size_t nrThreads) {
+
+  auto resources = initQuery(nrThreads);
+  auto c2 = types::Numeric<12, 2>::castString("0.07");
+  auto c3 = types::Integer(24);
+
+  auto& ord = db["orders"];
+  auto& li = db["lineitem"];
+
+  auto o_orderkey = ord["o_orderkey"].data<types::Integer>();
+  auto l_orderkey = li["l_orderkey"].data<types::Integer>();
+  auto o_orderdate = ord["o_orderdate"].data<types::Date>();
+  auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
+
+//  using hash = runtime::CRC32Hash;
+  using hash = runtime::MurMurHash;
+  using range = tbb::blocked_range<size_t>;
+  const auto add = [](const size_t& a, const size_t& b) {return a + b;};
+
+// build a hash table from [orders]
+  Hashset<types::Integer, hash> ht1;
+  tbb::enumerable_thread_specific<runtime::Stack<decltype(ht1)::Entry>> entries1;
+  auto found1 = tbb::parallel_reduce(range(0, ord.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+    auto found = f;
+    auto& entries = entries1.local();
+    for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
+      //if(o_orderdate[i] < pipeline_date) {
+        entries.emplace_back(ht1.hash(o_orderkey[i]), o_orderkey[i]);
+        found++;
+    //  }
+    }
+    return found;
+  },
+                                     add);
+
   ht1.setSize(found1);
   parallel_insert(entries1, ht1);
   cout << "Build hash table tuples num = " << found1 << endl;
   ht1.printSta();
   uint32_t probe_off[morselSize];
   void* build_add[morselSize];
+#if 0
+// look up the hash table 1
+  auto found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+        auto found = f;
+#if 0
+        for (size_t i = r.begin(), end = r.end(); i != end; ++i)
+        if ( ht1.contains(l_orderkey[i])) {
+          found++;
+        }
 
-  vector<pair<string, decltype(compilerjoinFun)> > compilerName2fun;
-  compilerName2fun.push_back(make_pair("probe_row", probe_row));
-//  compilerName2fun.push_back(make_pair("probe_simd", probe_simd));
-  compilerName2fun.push_back(make_pair("probe_amac", probe_amac));
-  compilerName2fun.push_back(make_pair("probe_gp", probe_gp));
-//  compilerName2fun.push_back(make_pair("probe_simd_amac", probe_simd_amac));
-  compilerName2fun.push_back(make_pair("probe_imv", probe_imv));
+#else
+        found+=compilerjoinFun(l_orderkey+r.begin(),r.size(),&ht1,build_add,probe_off);
+#endif
+        return found;
+      },
+      add);
+#if RESULTS
+  cout << "hyper join results :" << found2 << endl;
+#endif
+#else
+  vector<pair<string, decltype(pipelineFun)> > compilerName2fun;
+
+//  compilerName2fun.push_back(make_pair("filter_probe_scalar", filter_probe_scalar));
+  compilerName2fun.push_back(make_pair("filter_probe_imv1", filter_probe_imv1));
+  compilerName2fun.push_back(make_pair("filter_probe_imv2", filter_probe_imv2));
+  compilerName2fun.push_back(make_pair("filter_probe_imv", filter_probe_imv));
+  compilerName2fun.push_back(make_pair("filter_probe_simd_imv", filter_probe_simd_imv));
+  compilerName2fun.push_back(make_pair("filter_probe_simd_gp", filter_probe_simd_gp));
+  compilerName2fun.push_back(make_pair("filter_probe_simd_amac", filter_probe_simd_amac));
+
   PerfEvents event;
   uint64_t found2 = 0;
   for (auto name2fun : compilerName2fun) {
-    compilerjoinFun = name2fun.second;
-
+    auto pipelineFun = name2fun.second;
     event.timeAndProfile(name2fun.first, 10000, [&]() {
       found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
             auto found = f;
-            found+=compilerjoinFun(l_orderkey+r.begin(),r.size(),&ht1,build_add,probe_off, nullptr);
-            return found;
-          },
-          add);
-    },
+            uint64_t rof_buff[ROF_VECTOR_SIZE];
+#if 1
+                         found+=pipelineFun(r.begin(),r.end(),db,&ht1,build_add,probe_off,rof_buff);
+#else
+                         found+=compilerjoinFun(l_orderkey+r.begin(),r.size(),&ht1,build_add,probe_off,nullptr);
+#endif
+                         return found;
+                       },
+                       add);
+                 },
                          repetitions);
 #if RESULTS
-    cout << "hyper join results :" << found2 << endl;
+    cout << "pipeline results :" << found2 << endl;
 #endif
   }
+#endif
   leaveQuery(nrThreads);
 
   return true;
 }
 
-auto pipeline_date = types::Date::castString("1996-01-01");
-bool pipeline(Database& db, size_t nrThreads) {
-
-auto resources = initQuery(nrThreads);
-auto c2 = types::Numeric<12, 2>::castString("0.07");
-auto c3 = types::Integer(24);
-
-auto& ord = db["orders"];
-auto& li = db["lineitem"];
-
-auto o_orderkey = ord["o_orderkey"].data<types::Integer>();
-auto l_orderkey = li["l_orderkey"].data<types::Integer>();
-auto o_orderdate = ord["o_orderdate"].data<types::Date>();
-auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
-
-//  using hash = runtime::CRC32Hash;
-using hash = runtime::MurMurHash;
-using range = tbb::blocked_range<size_t>;
-const auto add = [](const size_t& a, const size_t& b) {return a + b;};
-
-// build a hash table from [orders]
-Hashset<types::Integer, hash> ht1;
-tbb::enumerable_thread_specific<runtime::Stack<decltype(ht1)::Entry>> entries1;
-auto found1 = tbb::parallel_reduce(range(0, ord.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
-  auto found = f;
-  auto& entries = entries1.local();
-  for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
-    if(o_orderdate[i] < pipeline_date) {
-      entries.emplace_back(ht1.hash(o_orderkey[i]), o_orderkey[i]);
-      found++;
-    }
-  }
-  return found;
-},
-                                   add);
-//
-ht1.setSize(found1);
-parallel_insert(entries1, ht1);
-uint32_t probe_off[morselSize];
-void* build_add[morselSize];
-#if 0
-// look up the hash table 1
-auto found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
-      auto found = f;
-#if 0
-      for (size_t i = r.begin(), end = r.end(); i != end; ++i)
-      if ( ht1.contains(l_orderkey[i])) {
-        found++;
-      }
-
-#else
-      found+=compilerjoinFun(l_orderkey+r.begin(),r.size(),&ht1,build_add,probe_off);
-#endif
-      return found;
-    },
-    add);
-#if RESULTS
-cout << "hyper join results :" << found2 << endl;
-#endif
-#else
-vector<pair<string, decltype(pipelineFun)> > compilerName2fun;
-
-compilerName2fun.push_back(make_pair("filter_probe_imv1", filter_probe_imv1));
-compilerName2fun.push_back(make_pair("filter_probe_imv", filter_probe_imv));
-compilerName2fun.push_back(make_pair("filter_probe_simd_imv", filter_probe_simd_imv));
-compilerName2fun.push_back(make_pair("filter_probe_simd_gp", filter_probe_simd_gp));
-compilerName2fun.push_back(make_pair("filter_probe_simd_amac", filter_probe_simd_amac));
-compilerName2fun.push_back(make_pair("filter_probe_scalar", filter_probe_scalar));
-
-PerfEvents event;
-uint64_t found2 = 0;
-for (auto name2fun : compilerName2fun) {
-  auto pipelineFun = name2fun.second;
-  event.timeAndProfile(name2fun.first, 10000, [&]() {
-    found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
-          auto found = f;
-          uint64_t rof_buff[ROF_VECTOR_SIZE];
-#if 1
-                       found+=pipelineFun(r.begin(),r.end(),db,&ht1,build_add,probe_off,rof_buff);
-#else
-                       found+=compilerjoinFun(l_orderkey+r.begin(),r.size(),&ht1,build_add,probe_off,nullptr);
-#endif
-                       return found;
-                     },
-                     add);
-               },
-                       repetitions);
-#if RESULTS
-  cout << "pipeline results :" << found2 << endl;
-#endif
-}
-#endif
-leaveQuery(nrThreads);
-
-return true;
-}
-
 types::Numeric<12, 2> pipeline_num = types::Numeric<12, 2>(types::Integer(24));
 
 std::unique_ptr<Q3Builder::Q3> Q3Builder::getQuery() {
-using namespace vectorwise;
-auto result = Result();
-previous = result.resultWriter.shared.result->participate();
-auto r = make_unique<Q3>();
+  using namespace vectorwise;
+  auto result = Result();
+  previous = result.resultWriter.shared.result->participate();
+  auto r = make_unique<Q3>();
 #if JOINALL
-auto order = Scan("orders");
-auto lineitem = Scan("lineitem");
+  auto order = Scan("orders");
+  auto lineitem = Scan("lineitem");
 
-HashJoin(Buffer(cust_ord, sizeof(pos_t)), vectorJoinFun).  //
-addBuildKey(Column(order, "o_orderkey"), conf.hash_int32_t_col(), primitives::scatter_int32_t_col).//
-addProbeKey(Column(lineitem, "l_orderkey"), conf.hash_int32_t_col(), primitives::keys_equal_int32_t_col);
+  HashJoin(Buffer(cust_ord, sizeof(pos_t)), vectorJoinFun).  //
+  addBuildKey(Column(order, "o_orderkey"), conf.hash_int32_t_col(), primitives::scatter_int32_t_col).//
+  addProbeKey(Column(lineitem, "l_orderkey"), conf.hash_int32_t_col(), primitives::keys_equal_int32_t_col);
 #else
 // JOIN SEL
 
-auto order = Scan("orders");
+  auto order = Scan("orders");
 //  o_orderdate < date '"1996-01-01"
-Select(Expression().addOp(BF(primitives::sel_less_Date_col_Date_val),  //
-                          Buffer(sel_order, sizeof(pos_t)),  //
-                          Column(order, "o_orderdate"),  //
-                          Value(&pipeline_date)));
+  Select(Expression().addOp(BF(primitives::sel_less_Date_col_Date_val),  //
+                            Buffer(sel_order, sizeof(pos_t)),  //
+                            Column(order, "o_orderdate"),  //
+                            Value(&pipeline_date)));
 ///////////NOTE the order
-auto lineitem = Scan("lineitem");
+  auto lineitem = Scan("lineitem");
 
 // l_quantity < 24
-Select((Expression()  //
-    .addOp(BF(vectorwise::primitives::sel_less_int64_t_col_int64_t_val),  //
-           Buffer(sel_cust, sizeof(pos_t)),  //
-           Column(lineitem, "l_quantity"),  //
-           Value(&pipeline_num))));
+  Select((Expression()  //
+      .addOp(BF(vectorwise::primitives::sel_less_int64_t_col_int64_t_val),  //
+             Buffer(sel_cust, sizeof(pos_t)),  //
+             Column(lineitem, "l_quantity"),  //
+             Value(&pipeline_num))));
 
-HashJoin(Buffer(cust_ord, sizeof(pos_t)), vectorJoinFun)  //
-    .setProbeSelVector(Buffer(sel_cust), vectorJoinFun).addBuildKey(Column(order, "o_orderkey"), Buffer(sel_order), conf.hash_sel_int32_t_col(),
-                                                                    primitives::scatter_sel_int32_t_col)  //
-    .addProbeKey(Column(lineitem, "l_orderkey"), Buffer(sel_cust), conf.hash_sel_int32_t_col(), primitives::keys_equal_int32_t_col);
+  HashJoin(Buffer(cust_ord, sizeof(pos_t)), vectorJoinFun)  //
+      .setProbeSelVector(Buffer(sel_cust), vectorJoinFun).addBuildKey(Column(order, "o_orderkey"), Buffer(sel_order), conf.hash_sel_int32_t_col(),
+                                                                      primitives::scatter_sel_int32_t_col)  //
+      .addProbeKey(Column(lineitem, "l_orderkey"), Buffer(sel_cust), conf.hash_sel_int32_t_col(), primitives::keys_equal_int32_t_col);
 
 #endif
 // count(*)
-FixedAggregation(Expression().addOp(primitives::aggr_static_count_star, Value(&r->count)));
+  FixedAggregation(Expression().addOp(primitives::aggr_static_count_star, Value(&r->count)));
 
 //   result.addValue("count", Buffer(cust_ord))
 //       .finalize();
 
-r->rootOp = popOperator();
-return r;
+  r->rootOp = popOperator();
+  return r;
 }
 bool join_vectorwise(Database& db, size_t nrThreads, size_t vectorSize) {
-using namespace vectorwise;
-WorkerGroup workers(nrThreads);
-vectorwise::SharedStateManager shared;
-std::unique_ptr<runtime::Query> result;
-std::atomic<int64_t> aggr;
-aggr = 0;
-workers.run([&]() {
-  Q3Builder builder(db, shared, vectorSize);
-  auto query = builder.getQuery();
-  /* auto found = */
-  auto n_ = query->rootOp->next();
-  if (n_) {
-    aggr.fetch_add(query->count);
-  }
+  using namespace vectorwise;
+  WorkerGroup workers(nrThreads);
+  vectorwise::SharedStateManager shared;
+  std::unique_ptr<runtime::Query> result;
+  std::atomic<int64_t> aggr;
+  aggr = 0;
+  workers.run([&]() {
+    Q3Builder builder(db, shared, vectorSize);
+    auto query = builder.getQuery();
+    /* auto found = */
+    auto n_ = query->rootOp->next();
+    if (n_) {
+      aggr.fetch_add(query->count);
+    }
 #if RESULTS
-            auto leader = barrier();
-            if (leader) {
-              cout<<"vectorwise join result: "<< aggr.load()<<endl;
-            }
+              auto leader = barrier();
+              if (leader) {
+                cout<<"vectorwise join result: "<< aggr.load()<<endl;
+              }
 #endif
-          });
-for (int i = 1; i < workers.pipeline_cost_time.size(); ++i) {
-  double run_time = workers.pipeline_cost_time[i].second - workers.pipeline_cost_time[i - 1].second;
-  cout << workers.pipeline_cost_time[i].first << " cost time = " << run_time * 1e3 << std::endl;
-}
+            });
+  for (int i = 1; i < workers.pipeline_cost_time.size(); ++i) {
+    double run_time = workers.pipeline_cost_time[i].second - workers.pipeline_cost_time[i - 1].second;
+    cout << workers.pipeline_cost_time[i].first << " cost time = " << run_time * 1e3 << std::endl;
+  }
 
-return true;
+  return true;
 }
 
 size_t nrTuples(Database& db, std::vector<std::string> tables) {
-size_t sum = 0;
-for (auto& table : tables)
-  sum += db[table].nrTuples;
-return sum;
+  size_t sum = 0;
+  for (auto& table : tables)
+    sum += db[table].nrTuples;
+  return sum;
 }
 void test_vectorwise_probe(Database& db, size_t nrThreads) {
-PerfEvents e;
-size_t vectorSize = 1024;
-vector<pair<string, decltype(vectorJoinFun)> > vectorName2fun;
-vectorName2fun.push_back(make_pair("joinAllSIMD", &vectorwise::Hashjoin::joinAllSIMD));
-vectorName2fun.push_back(make_pair("joinAllParallel", &vectorwise::Hashjoin::joinAllParallel));
-vectorName2fun.push_back(make_pair("joinBoncz", &vectorwise::Hashjoin::joinBoncz));
-vectorName2fun.push_back(make_pair("joinRow", &vectorwise::Hashjoin::joinRow));
-vectorName2fun.push_back(make_pair("joinAMAC", &vectorwise::Hashjoin::joinAMAC));
-vectorName2fun.push_back(make_pair("joinFullSIMD", &vectorwise::Hashjoin::joinFullSIMD));
-vectorName2fun.push_back(make_pair("joinSIMDAMAC", &vectorwise::Hashjoin::joinSIMDAMAC));
-vectorName2fun.push_back(make_pair("joinIMV", &vectorwise::Hashjoin::joinIMV));
+  PerfEvents e;
+  size_t vectorSize = 1024;
+  vector<pair<string, decltype(vectorJoinFun)> > vectorName2fun;
+  vectorName2fun.push_back(make_pair("joinAllSIMD", &vectorwise::Hashjoin::joinAllSIMD));
+  vectorName2fun.push_back(make_pair("joinAllParallel", &vectorwise::Hashjoin::joinAllParallel));
+  vectorName2fun.push_back(make_pair("joinBoncz", &vectorwise::Hashjoin::joinBoncz));
+  vectorName2fun.push_back(make_pair("joinRow", &vectorwise::Hashjoin::joinRow));
+  vectorName2fun.push_back(make_pair("joinAMAC", &vectorwise::Hashjoin::joinAMAC));
+  vectorName2fun.push_back(make_pair("joinFullSIMD", &vectorwise::Hashjoin::joinFullSIMD));
+  vectorName2fun.push_back(make_pair("joinSIMDAMAC", &vectorwise::Hashjoin::joinSIMDAMAC));
+  vectorName2fun.push_back(make_pair("joinIMV", &vectorwise::Hashjoin::joinIMV));
 
-for (auto name2fun : vectorName2fun) {
-  vectorJoinFun = name2fun.second;
-  e.timeAndProfile(name2fun.first, nrTuples(db, { "orders", "lineitem" }), [&]() {
-    join_vectorwise(db,nrThreads,vectorSize);
-  },
-                   repetitions);
-}
+  for (auto name2fun : vectorName2fun) {
+    vectorJoinFun = name2fun.second;
+    e.timeAndProfile(name2fun.first, nrTuples(db, { "orders", "lineitem" }), [&]() {
+      join_vectorwise(db,nrThreads,vectorSize);
+    },
+                     repetitions);
+  }
 }
 void test_vectorwise_sel_probe(Database& db, size_t nrThreads) {
-PerfEvents e;
-size_t vectorSize = 1024;
-vector<pair<string, decltype(vectorJoinFun)> > vectorName2fun;
-vectorName2fun.push_back(make_pair("joinAllSIMD", &vectorwise::Hashjoin::joinSelSIMD));
-vectorName2fun.push_back(make_pair("joinAllParallel", &vectorwise::Hashjoin::joinSelParallel));
-vectorName2fun.push_back(make_pair("joinIMV", &vectorwise::Hashjoin::joinSelIMV));
+  PerfEvents e;
+  size_t vectorSize = 1024;
+  vector<pair<string, decltype(vectorJoinFun)> > vectorName2fun;
+  vectorName2fun.push_back(make_pair("joinAllSIMD", &vectorwise::Hashjoin::joinSelSIMD));
+  vectorName2fun.push_back(make_pair("joinAllParallel", &vectorwise::Hashjoin::joinSelParallel));
+  vectorName2fun.push_back(make_pair("joinIMV", &vectorwise::Hashjoin::joinSelIMV));
 
-for (auto name2fun : vectorName2fun) {
-  vectorJoinFun = name2fun.second;
-  e.timeAndProfile(name2fun.first, nrTuples(db, { "orders", "lineitem" }), [&]() {
-    join_vectorwise(db,nrThreads,vectorSize);
-  },
-                   repetitions);
-}
+  for (auto name2fun : vectorName2fun) {
+    vectorJoinFun = name2fun.second;
+    e.timeAndProfile(name2fun.first, nrTuples(db, { "orders", "lineitem" }), [&]() {
+      join_vectorwise(db,nrThreads,vectorSize);
+    },
+                     repetitions);
+  }
 }
 int main(int argc, char* argv[]) {
-if (argc <= 2) {
-  std::cerr << "Usage: ./" << argv[0] << "<number of repetitions> <path to tpch dir> [nrThreads = all] \n "
-            " EnvVars: [vectorSize = 1024] [SIMDhash = 0] [SIMDjoin = 0] "
-            "[SIMDsel = 0]";
-  exit(1);
-}
+  if (argc <= 2) {
+    std::cerr << "Usage: ./" << argv[0] << "<number of repetitions> <path to tpch dir> [nrThreads = all] \n "
+              " EnvVars: [vectorSize = 1024] [SIMDhash = 0] [SIMDjoin = 0] "
+              "[SIMDsel = 0]";
+    exit(1);
+  }
 
-Database tpch;
+  Database tpch;
 // load tpch data
-importTPCH(argv[2], tpch);
+  importTPCH(argv[2], tpch);
 
 // run queries
-repetitions = atoi(argv[1]);
-size_t nrThreads = std::thread::hardware_concurrency();
-size_t vectorSize = 1024;
-bool clearCaches = false;
-if (argc > 3)
-  nrThreads = atoi(argv[3]);
+  repetitions = atoi(argv[1]);
+  size_t nrThreads = std::thread::hardware_concurrency();
+  size_t vectorSize = 1024;
+  bool clearCaches = false;
+  if (argc > 3)
+    nrThreads = atoi(argv[3]);
 
-tbb::task_scheduler_init scheduler(nrThreads);
-probe_test(tpch, nrThreads);
-//pipeline(tpch, nrThreads);
+  tbb::task_scheduler_init scheduler(nrThreads);
+//  probe_test(tpch, nrThreads);
+pipeline(tpch, nrThreads);
 //join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
 //test_agg(tpch, nrThreads);
 
 // test_vectorwise_probe(tpch, nrThreads);
 // test_vectorwise_sel_probe(tpch, nrThreads);
-scheduler.terminate();
-return 0;
+  scheduler.terminate();
+  return 0;
 }

@@ -33,7 +33,7 @@ inline void leaveQuery(size_t nrThreads) {
    runtime::Barrier b(nrThreads);
    tbb::parallel_for(size_t(0), nrThreads, size_t(1), [&](auto) {
       // reset thread local worker pointer
-     if(runtime::this_worker->previousWorker)
+     //if(runtime::this_worker->previousWorker)
       runtime::this_worker = runtime::this_worker->previousWorker;
       b.wait();
    });
