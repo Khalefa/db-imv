@@ -19,7 +19,7 @@
 #include "common/defs.hpp"
 #define VECTORSIZE 8
 #define ROF_VECTOR_SIZE 10000
-#define PDIS 640
+#define PDIS 1024
 #define PDISD 64
 #define EARLY_BREAK 1
 #define SEQ_PREFETCH 1

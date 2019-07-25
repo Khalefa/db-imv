@@ -268,7 +268,7 @@ class Hashjoin : public BinaryOperator {
    } cont;
 
 /// struct for amac
-   static  const uint8_t stateNum=40, imvNum=6;
+   static  const uint8_t stateNum=40, imvNum=8;
    struct AMACState {
      uint8_t stage;
      int probeKey=0;

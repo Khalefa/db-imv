@@ -224,7 +224,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
 
                                      if(!exist) {
 #if ORDERKEY
-                                     ht.setSize(1500000);
+                                     ht.setSize(150000);
 #else
                                      ht.setSize(100000);
 
@@ -352,7 +352,7 @@ void test_agg(Database& db, size_t nrThreads) {
   vector<pair<string, decltype(aggFun)> > agg_name2fun;
   // agg_name2fun.push_back(make_pair("agg_simd", agg_simd));
   agg_name2fun.push_back(make_pair("agg_imv_merged", agg_imv_merged));
-  agg_name2fun.push_back(make_pair("agg_imv", agg_imv));
+  agg_name2fun.push_back(make_pair("agg_imv_hybrid", agg_imv_hybrid));
   agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
   agg_name2fun.push_back(make_pair("agg_imv_serial", agg_imv_serial));
   agg_name2fun.push_back(make_pair("agg_gp", agg_gp));
