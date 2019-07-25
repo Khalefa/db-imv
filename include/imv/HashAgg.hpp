@@ -1,6 +1,6 @@
 #pragma once
 #include "head.hpp"
-#define ORDERKEY 0
+#define ORDERKEY 1
 
 struct AMACState {
   uint8_t stage;
@@ -85,6 +85,8 @@ size_t agg_gp(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, t
 size_t agg_simd(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
                 PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
 size_t agg_imv(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
+               PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
+size_t agg_imv1(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
                PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
 size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
                PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);

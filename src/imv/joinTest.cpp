@@ -243,7 +243,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
 // global aggregation: each thread process some partitions
 // aggregate from spill partitions
   auto nrPartitions = partitionedDeques.begin()->getPartitions().size();
-
+#if 0
   tbb::parallel_for(0ul, nrPartitions, [&](auto partitionNr) {
     bool exist=false;
     auto& ht = hash_table.local(exist);
@@ -343,8 +343,8 @@ if(found>0) {
 
 #endif
     });
-  printResult(resources.query->result.get());
-
+//  printResult(resources.query->result.get());
+#endif
   leaveQuery(nrThreads);
   return true;
 }
@@ -353,10 +353,11 @@ void test_agg(Database& db, size_t nrThreads) {
   // agg_name2fun.push_back(make_pair("agg_simd", agg_simd));
   agg_name2fun.push_back(make_pair("agg_imv_merged", agg_imv_merged));
   agg_name2fun.push_back(make_pair("agg_imv", agg_imv));
+  agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
   agg_name2fun.push_back(make_pair("agg_imv_serial", agg_imv_serial));
-  agg_name2fun.push_back(make_pair("agg_raw", agg_raw));
   agg_name2fun.push_back(make_pair("agg_gp", agg_gp));
   agg_name2fun.push_back(make_pair("agg_amac", agg_amac));
+  agg_name2fun.push_back(make_pair("agg_raw", agg_raw));
 
   PerfEvents event;
   uint64_t found2 = 0;
@@ -839,10 +840,10 @@ int main(int argc, char* argv[]) {
 
   tbb::task_scheduler_init scheduler(nrThreads);
 //  probe_test(tpch, nrThreads);
-pipeline(tpch, nrThreads);
+//pipeline(tpch, nrThreads);
 //join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
-//test_agg(tpch, nrThreads);
+test_agg(tpch, nrThreads);
 
 // test_vectorwise_probe(tpch, nrThreads);
 // test_vectorwise_sel_probe(tpch, nrThreads);

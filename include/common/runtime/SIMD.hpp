@@ -37,8 +37,8 @@ inline Vec8u operator+ (const Vec8u& a, const Vec8u& b) { return _mm512_add_epi6
 inline Vec8u operator- (const Vec8u& a, const Vec8u& b) { return _mm512_sub_epi64(a.reg, b.reg); }
 inline Vec8u operator* (const Vec8u& a, const Vec8u& b) { return _mm512_mullo_epi64(a.reg, b.reg); }
 inline Vec8u operator^ (const Vec8u& a, const Vec8u& b) { return _mm512_xor_epi64(a.reg, b.reg); }
-inline Vec8u operator>> (const Vec8u& a, const unsigned shift) { return _mm512_srli_epi64(a.reg, shift); }
-inline Vec8u operator<< (const Vec8u& a, const unsigned shift) { return _mm512_slli_epi64(a.reg, shift); }
+inline Vec8u operator>> (const Vec8u& a, const uint8_t shift) { return _mm512_srli_epi64(a.reg, shift); }
+inline Vec8u operator<< (const Vec8u& a, const uint8_t shift) { return _mm512_slli_epi64(a.reg, shift); }
 inline Vec8u operator>> (const Vec8u& a, const Vec8u& shift) { return _mm512_srlv_epi64(a.reg, shift.reg); }
 inline Vec8u operator<< (const Vec8u& a, const Vec8u& shift) { return _mm512_sllv_epi64(a.reg, shift.reg); }
 inline Vec8u operator& (const Vec8u& a, const Vec8u& b) { return _mm512_and_epi64(a.reg, b.reg); }
