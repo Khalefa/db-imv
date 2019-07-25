@@ -1,6 +1,7 @@
 #include "imv/HashAgg.hpp"
 int agg_constrant = 50;
 std::map<uint64_t, uint64_t> match_counts, bucket_counts, end_counts;
+__m512i v_all_ones = _mm512_set1_epi64(-1), v_zero = _mm512_set1_epi64(0), v_63 = _mm512_set1_epi64(63);
 
 size_t agg_raw(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table, PartitionedDeque<1024>* partition,
                void** entry_addrs, void** results_entry) {
@@ -420,6 +421,64 @@ size_t agg_simd(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
 
   return found;
 }
+
+inline void insertNewEntry(AggState& state, Vec8u& u_new_addrs, __mmask8 m_no_conflict, PartitionedDeque<1024>* partition, __m512i& u_offset_hash, __m512i& u_offset_k, __m512i& u_offset_v) {
+  Vec8u u_probe_hash(state.v_probe_hash);
+  for(int i=0;i<VECTORSIZE;++i) {
+    u_new_addrs.entry[i] =0;
+    if(m_no_conflict & (1<<i)) {
+      u_new_addrs.entry[i] = (uint64_t)partition->partition_allocate(u_probe_hash.entry[i]);
+    }
+  }
+  // write entry->next
+  _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs.reg,v_zero,1);
+  // write entry->hash
+  _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs + u_offset_hash,state.v_probe_hash,1);
+  // write entry->k , NOTE it is 32 bits
+  _mm512_mask_i64scatter_epi32(0,m_no_conflict,u_new_addrs + u_offset_k,_mm512_cvtepi64_epi32(state.v_probe_keys),1);
+  // write entry->v
+  _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs + u_offset_v,state.v_probe_value,1);
+}
+inline void mergeKeys(AggState& state) {
+  auto v_conflict = _mm512_conflict_epi64(state.v_probe_keys);
+  auto m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
+  m_no_conflict = _mm512_kand(m_no_conflict, state.m_valid_probe);
+  uint64_t* pos_k = (uint64_t*) &state.v_probe_keys;
+  uint64_t* pos_v = (uint64_t*) &state.v_probe_value;
+  auto v_lzeros = _mm512_lzcnt_epi64(v_conflict);
+  v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
+  uint64_t* pos_lz = (uint64_t*) &v_lzeros;
+  for (int i = VECTORSIZE - 1; i >= 0; --i) {
+    if (!(m_no_conflict & (1 << i))) {
+      pos_v[pos_lz[i]] += pos_v[i];
+    }
+  }
+  state.m_valid_probe = m_no_conflict;
+  state.v_probe_keys = _mm512_mask_blend_epi64(m_no_conflict, v_all_ones, state.v_probe_keys);
+}
+inline void insertAllNewEntry(AggState& state, Vec8u& u_new_addrs, __m512i& v_conflict, __mmask8 m_to_insert, __mmask8 m_no_conflict, PartitionedDeque<1024>* partition,  __m512i& u_offset_hash, __m512i& u_offset_k, __m512i& u_offset_v) {
+  Vec8u u_probe_hash(state.v_probe_hash);
+  for(int i=0;i<VECTORSIZE;++i) {
+    u_new_addrs.entry[i] =0;
+    if(m_to_insert & (1<<i)) {
+      u_new_addrs.entry[i] = (uint64_t)partition->partition_allocate(u_probe_hash.entry[i]);
+    }
+  }
+  // write entry->next
+  _mm512_mask_i64scatter_epi64(0,m_to_insert,u_new_addrs.reg,v_zero,1);
+  // write entry->hash
+  _mm512_mask_i64scatter_epi64(0,m_to_insert,u_new_addrs + u_offset_hash,state.v_probe_hash,1);
+  // write entry->k , NOTE it is 32 bits
+  _mm512_mask_i64scatter_epi32(0,m_to_insert,u_new_addrs + u_offset_k,_mm512_cvtepi64_epi32(state.v_probe_keys),1);
+  // write entry->v
+  _mm512_mask_i64scatter_epi64(0,m_to_insert,u_new_addrs + u_offset_v,state.v_probe_value,1);
+  // write the addresses to the previous'next
+  auto v_lzeros = _mm512_lzcnt_epi64(v_conflict);
+  v_lzeros = _mm512_sub_epi64(v_63,v_lzeros);
+  auto to_scatt= _mm512_kandn(m_no_conflict,m_to_insert);
+  auto v_previous = _mm512_maskz_permutexvar_epi64(to_scatt,v_lzeros,u_new_addrs.reg);
+  _mm512_mask_i64scatter_epi64(0,to_scatt,v_previous,u_new_addrs.reg,1);
+}
 size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table, PartitionedDeque<1024>* partition,
                       void** entry_addrs, void** results_entry) {
   size_t found = 0, pos = 0, cur = begin;
@@ -445,23 +504,7 @@ size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::In
   for (int i = 0; i <= VECTORSIZE; ++i) {
     mask[i] = (1 << i) - 1;
   }
-  auto insertNewEntry = [&](AggState& state) {
-    Vec8u u_probe_hash(state.v_probe_hash);
-    for(int i=0;i<VECTORSIZE;++i) {
-      u_new_addrs.entry[i] =0;
-      if(m_no_conflict & (1<<i)) {
-        u_new_addrs.entry[i] = (uint64_t)partition->partition_allocate(u_probe_hash.entry[i]);
-      }
-    }
-    // write entry->next
-      _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs.reg,v_zero,1);
-      // write entry->hash
-      _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs + u_offset_hash,state.v_probe_hash,1);
-      // write entry->k , NOTE it is 32 bits
-      _mm512_mask_i64scatter_epi32(0,m_no_conflict,u_new_addrs + u_offset_k,_mm512_cvtepi64_epi32(state.v_probe_keys),1);
-      // write entry->v
-      _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs + u_offset_v,state.v_probe_value,1);
-    };
+
   while (true) {
     k = (k >= imvNum) ? 0 : k;
     if ((cur >= end)) {
@@ -534,7 +577,7 @@ size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::In
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (nullptr == entry_addrs) {
-          insertNewEntry(state[k]);
+          insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
           _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
         } else {
@@ -615,7 +658,7 @@ size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::In
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
 
         if (nullptr == entry_addrs) {
-          insertNewEntry(state[k]);
+          insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
           _mm512_mask_i64scatter_epi64(0, m_no_conflict, state[k].v_bucket_addrs, u_new_addrs.reg, 1);
         } else {
@@ -632,7 +675,7 @@ size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::In
         state[k].v_bucket_addrs = _mm512_mask_blend_epi64(m_match, v_next, state[k].v_bucket_addrs);
 
         num = _mm_popcnt_u32(state[k].m_valid_probe);
-        if (num == VECTORSIZE|| done>=imvNum) {
+        if (num == VECTORSIZE || done >= imvNum) {
           v_prefetch(state[k].v_bucket_addrs);
         } else {
           if ((done < imvNum)) {
@@ -676,7 +719,7 @@ size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::In
  * first merge all possible equal keys at stage 2, but there are equal keys at stage 0, so adopt the serial way to update and insert
  */
 size_t agg_imv_hybrid(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table, PartitionedDeque<1024>* partition,
-               void** entry_addrs, void** results_entry) {
+                      void** entry_addrs, void** results_entry) {
   size_t found = 0, pos = 0, cur = begin;
   int k = 0, done = 0, buildkey, probeKey, valid_size, imvNum = vectorwise::Hashjoin::imvNum, imvNum1 = vectorwise::Hashjoin::imvNum + 1;
   AggState state[stateNumSIMD + 2];
@@ -700,40 +743,7 @@ size_t agg_imv_hybrid(size_t begin, size_t end, Database& db, Hashmapx<types::In
   for (int i = 0; i <= VECTORSIZE; ++i) {
     mask[i] = (1 << i) - 1;
   }
-  auto insertNewEntry = [&](AggState& state) {
-    Vec8u u_probe_hash(state.v_probe_hash);
-    for(int i=0;i<VECTORSIZE;++i) {
-      u_new_addrs.entry[i] =0;
-      if(m_no_conflict & (1<<i)) {
-        u_new_addrs.entry[i] = (uint64_t)partition->partition_allocate(u_probe_hash.entry[i]);
-      }
-    }
-    // write entry->next
-      _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs.reg,v_zero,1);
-      // write entry->hash
-      _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs + u_offset_hash,state.v_probe_hash,1);
-      // write entry->k , NOTE it is 32 bits
-      _mm512_mask_i64scatter_epi32(0,m_no_conflict,u_new_addrs + u_offset_k,_mm512_cvtepi64_epi32(state.v_probe_keys),1);
-      // write entry->v
-      _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs + u_offset_v,state.v_probe_value,1);
-    };
-  auto mergeKeys = [&](AggState& state) {
-    v_conflict = _mm512_conflict_epi64(state.v_probe_keys);
-    m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
-    m_no_conflict = _mm512_kand(m_no_conflict, state.m_valid_probe);
-    uint64_t* pos_k = (uint64_t*)&state.v_probe_keys;
-    uint64_t* pos_v = (uint64_t*)&state.v_probe_value;
-    v_lzeros = _mm512_lzcnt_epi64(v_conflict);
-    v_lzeros = _mm512_sub_epi64(v_63,v_lzeros);
-    uint64_t* pos_lz = (uint64_t*)&v_lzeros;
-    for(int i=VECTORSIZE-1;i>=0;--i) {
-      if(!(m_no_conflict & (1<<i))) {
-        pos_v[pos_lz[i]]+=pos_v[i];
-      }
-    }
-    state.m_valid_probe = m_no_conflict;
-    state.v_probe_keys = _mm512_mask_blend_epi64(m_no_conflict,v_all_ones,state.v_probe_keys);
-  };
+
   while (true) {
     k = (k >= imvNum) ? 0 : k;
     if ((cur >= end)) {
@@ -809,7 +819,7 @@ size_t agg_imv_hybrid(size_t begin, size_t end, Database& db, Hashmapx<types::In
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
 
         if (nullptr == entry_addrs) {
-          insertNewEntry(state[k]);
+          insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition,  u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
           _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
         } else {
@@ -890,7 +900,7 @@ size_t agg_imv_hybrid(size_t begin, size_t end, Database& db, Hashmapx<types::In
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
 
         if (nullptr == entry_addrs) {
-          insertNewEntry(state[k]);
+          insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
           _mm512_mask_i64scatter_epi64(0, m_no_conflict, state[k].v_bucket_addrs, u_new_addrs.reg, 1);
         } else {
@@ -907,7 +917,7 @@ size_t agg_imv_hybrid(size_t begin, size_t end, Database& db, Hashmapx<types::In
         state[k].v_bucket_addrs = _mm512_mask_blend_epi64(m_match, v_next, state[k].v_bucket_addrs);
 
         num = _mm_popcnt_u32(state[k].m_valid_probe);
-        if (num == VECTORSIZE|| done>=imvNum) {
+        if (num == VECTORSIZE || done >= imvNum) {
           v_prefetch(state[k].v_bucket_addrs);
         } else {
           if ((done < imvNum)) {
@@ -972,40 +982,7 @@ size_t agg_imv1(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
   for (int i = 0; i <= VECTORSIZE; ++i) {
     mask[i] = (1 << i) - 1;
   }
-  auto insertNewEntry = [&](AggState& state) {
-    Vec8u u_probe_hash(state.v_probe_hash);
-    for(int i=0;i<VECTORSIZE;++i) {
-      u_new_addrs.entry[i] =0;
-      if(m_no_conflict & (1<<i)) {
-        u_new_addrs.entry[i] = (uint64_t)partition->partition_allocate(u_probe_hash.entry[i]);
-      }
-    }
-    // write entry->next
-      _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs.reg,v_zero,1);
-    // write entry->hash
-      _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs + u_offset_hash,state.v_probe_hash,1);
-    // write entry->k , NOTE it is 32 bits
-      _mm512_mask_i64scatter_epi32(0,m_no_conflict,u_new_addrs + u_offset_k,_mm512_cvtepi64_epi32(state.v_probe_keys),1);
-    // write entry->v
-      _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs + u_offset_v,state.v_probe_value,1);
-    };
-  auto mergeKeys = [&](AggState& state) {
-    v_conflict = _mm512_conflict_epi64(state.v_probe_keys);
-    m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
-    m_no_conflict = _mm512_kand(m_no_conflict, state.m_valid_probe);
-    uint64_t* pos_k = (uint64_t*)&state.v_probe_keys;
-    uint64_t* pos_v = (uint64_t*)&state.v_probe_value;
-    v_lzeros = _mm512_lzcnt_epi64(v_conflict);
-    v_lzeros = _mm512_sub_epi64(v_63,v_lzeros);
-    uint64_t* pos_lz = (uint64_t*)&v_lzeros;
-    for(int i=VECTORSIZE-1;i>=0;--i) {
-      if(!(m_no_conflict & (1<<i))) {
-        pos_v[pos_lz[i]]+=pos_v[i];
-      }
-    }
-    state.m_valid_probe = m_no_conflict;
-    state.v_probe_keys = _mm512_mask_blend_epi64(m_no_conflict,v_all_ones,state.v_probe_keys);
-  };
+
   while (true) {
     k = (k >= imvNum) ? 0 : k;
     if ((cur >= end)) {
@@ -1081,7 +1058,7 @@ size_t agg_imv1(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
 
         if (nullptr == entry_addrs) {
-          insertNewEntry(state[k]);
+          insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition,  u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
           _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
         } else {
@@ -1156,7 +1133,7 @@ size_t agg_imv1(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (nullptr == entry_addrs) {
-          insertNewEntry(state[k]);
+          insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
           _mm512_mask_i64scatter_epi64(0, m_no_conflict, state[k].v_bucket_addrs, u_new_addrs.reg, 1);
         } else {
@@ -1239,53 +1216,12 @@ size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::In
   Vec8u u_new_addrs(uint64_t(0)), u_offset_hash(offsetof(group_t, h.hash)), u_offset_k(offsetof(group_t, k)), u_offset_v(offsetof(group_t, v));
   __mmask8 m_no_conflict, m_rest, m_match, m_to_insert, mask[VECTORSIZE + 1], to_scatt;
   void* probe_keys = (void*) l_orderkey, *probe_value = (void*) l_discount;
-  __m256i v256_zero = _mm256_set1_epi32(0), v256_all_one= _mm256_set1_epi32(-1),v256_probe_keys, v256_probe_value, v256_ht_keys;
+  __m256i v256_zero = _mm256_set1_epi32(0), v256_all_one = _mm256_set1_epi32(-1), v256_probe_keys, v256_probe_value, v256_ht_keys;
   uint8_t num, num_temp;
   for (int i = 0; i <= VECTORSIZE; ++i) {
     mask[i] = (1 << i) - 1;
   }
-  auto insertNewEntry = [&](AggState& state) {
-    Vec8u u_probe_hash(state.v_probe_hash);
-    for(int i=0;i<VECTORSIZE;++i) {
-      u_new_addrs.entry[i] =0;
-      if(m_to_insert & (1<<i)) {
-        u_new_addrs.entry[i] = (uint64_t)partition->partition_allocate(u_probe_hash.entry[i]);
-      }
-    }
-    // write entry->next
-      _mm512_mask_i64scatter_epi64(0,m_to_insert,u_new_addrs.reg,v_zero,1);
-    // write entry->hash
-      _mm512_mask_i64scatter_epi64(0,m_to_insert,u_new_addrs + u_offset_hash,state.v_probe_hash,1);
-    // write entry->k , NOTE it is 32 bits
-      _mm512_mask_i64scatter_epi32(0,m_to_insert,u_new_addrs + u_offset_k,_mm512_cvtepi64_epi32(state.v_probe_keys),1);
-    // write entry->v
-      _mm512_mask_i64scatter_epi64(0,m_to_insert,u_new_addrs + u_offset_v,state.v_probe_value,1);
-    // write the addresses to the previous'next
-      v_lzeros = _mm512_lzcnt_epi64(v_conflict);
-      v_lzeros = _mm512_sub_epi64(v_63,v_lzeros);
-      to_scatt= _mm512_kandn(m_no_conflict,m_to_insert);
-      v_previous = _mm512_maskz_permutexvar_epi64(to_scatt,v_lzeros,u_new_addrs.reg);
-      _mm512_mask_i64scatter_epi64(0,to_scatt,v_previous,u_new_addrs.reg,1);
 
-    };
-  auto mergeKeys = [&](AggState& state) {
-    v_conflict = _mm512_conflict_epi64(state.v_probe_keys);
-    m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
-    m_no_conflict = _mm512_kand(m_no_conflict, state.m_valid_probe);
-    uint64_t* pos_k = (uint64_t*)&state.v_probe_keys;
-    uint64_t* pos_v = (uint64_t*)&state.v_probe_value;
-    v_lzeros = _mm512_lzcnt_epi64(v_conflict);
-    v_lzeros = _mm512_sub_epi64(v_63,v_lzeros);
-    uint64_t* pos_lz = (uint64_t*)&v_lzeros;
-    for(int i=VECTORSIZE-1;i>=0;--i) {
-      if(!(m_no_conflict & (1<<i))) {
-        pos_v[pos_lz[i]]+=pos_v[i];
-      }
-    }
-    state.m_valid_probe = m_no_conflict;
-    state.v_probe_keys = _mm512_mask_blend_epi64(m_no_conflict,v_all_ones,state.v_probe_keys);
-
-  };
   while (true) {
     k = (k >= imvNum) ? 0 : k;
     if ((cur >= end)) {
@@ -1362,7 +1298,7 @@ size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::In
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (nullptr == entry_addrs) {
-          insertNewEntry(state[k]);
+          insertAllNewEntry(state[k], u_new_addrs, v_conflict, m_to_insert, m_no_conflict, partition,  u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
           _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
         } else {
@@ -1444,7 +1380,7 @@ size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::In
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (nullptr == entry_addrs) {
-          insertNewEntry(state[k]);
+          insertAllNewEntry(state[k], u_new_addrs, v_conflict, m_to_insert, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
           _mm512_mask_i64scatter_epi64(0, m_no_conflict, state[k].v_bucket_addrs, u_new_addrs.reg, 1);
         } else {
