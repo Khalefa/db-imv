@@ -24,17 +24,17 @@ OPTION(AVX512EXPERIMENTS ON)
 OPTION(HARDWARE_BENCHMARKS ON)
 OPTION(INTERPRET_SEPARATE OFF)
 OPTION(HASH_SIZE_32 OFF)
-OPTION(KNL OFF)
+OPTION(KNL ON)
 
 
 #-mtune=native -g
 # Compiler flags for the different targets
 if(KNL)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -mtune=native -std=c++14 -g -fPIC -w -Wextra -Wno-psabi  -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512pf -mavx512er -mavx512cd -mavx2 -mbmi2 -mavx")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -mtune=native -std=c++14 -g -fPIC -w -Wextra -Wno-psabi  -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512pf -mavx512er -mavx512cd -mavx2 -mbmi2 -mavx -fpermissive")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -w -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512pf -mavx512er -mavx512cd -mavx2 -mbmi2 -mavx -fpermissive")
 else()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=skylake-avx512 -g -mtune=native -std=c++14 -fPIC -w -Wextra -Wno-psabi  -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -w -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx -fpermissive")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -w -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
 endif(KNL)
 
 if(LINUX)
@@ -215,9 +215,11 @@ target_include_directories(vectorwise PUBLIC
     PRIVATE src)
 # Set architecture if AVX512 exerperiments are requested
 if(AVX512EXPERIMENTS)
+if(!KNL)
   SET_TARGET_PROPERTIES(vectorwise PROPERTIES
     COMPILE_FLAGS "-march=skylake-avx512"
   )
+endif()
 endif()
 target_link_libraries(vectorwise common)
 
@@ -359,9 +361,11 @@ endif(AVX512EXPERIMENTS)
 
 
  add_executable(join_test src/imv/joinTest.cpp)
+if(!KNL)
   SET_TARGET_PROPERTIES(join_test PROPERTIES
     COMPILE_FLAGS "-march=skylake-avx512"
     )
+endif()
   target_include_directories(join_test PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>

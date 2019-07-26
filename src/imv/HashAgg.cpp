@@ -339,12 +339,12 @@ size_t agg_simd(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
       /// step 2: gather probe keys and values
       v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state.m_valid_probe, state.v_probe_offset, (void* )probe_keys, 4);
       state.v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
-      state.v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state.m_valid_probe, state.v_probe_offset, (void* )probe_value, 8);
+      state.v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state.m_valid_probe, state.v_probe_offset, (const long long int* )probe_value, 8);
       /// step 3: compute hash values
       state.v_probe_hash = runtime::MurMurHash()((state.v_probe_keys), (v_seed));
     } else {
       // gather the addresses of entries
-      state.v_probe_offset = _mm512_mask_i64gather_epi64(v_zero, state.m_valid_probe, state.v_probe_offset, entry_addrs, 8);
+      state.v_probe_offset = _mm512_mask_i64gather_epi64(v_zero, state.m_valid_probe, state.v_probe_offset, (const long long int*)entry_addrs, 8);
       v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state.m_valid_probe, state.v_probe_offset + u_offset_k, nullptr, 1);
       state.v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
       state.v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state.m_valid_probe, state.v_probe_offset+u_offset_v, nullptr, 1);
@@ -362,17 +362,17 @@ size_t agg_simd(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
     if (nullptr == entry_addrs) {
       insertNewEntry();
       // insert the new addresses to the hash table
-      _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
+      _mm512_mask_i64scatter_epi64((long long int *)hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
     } else {
       // set the next of entries = 0
       _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state.v_probe_offset, v_zero, 1);
-      _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, state.v_probe_offset, 8);
+      _mm512_mask_i64scatter_epi64((long long int *)hash_table->entries, m_no_conflict, v_hash_mask, state.v_probe_offset, 8);
       _mm512_mask_compressstoreu_epi64((results_entry + found), m_no_conflict, state.v_probe_offset);
     }
     found += _mm_popcnt_u32(m_no_conflict);
     // get rid of no-conflict elements
     state.m_valid_probe = _mm512_kandn(m_no_conflict, state.m_valid_probe);
-    state.v_bucket_addrs = _mm512_mask_i64gather_epi64(v_all_ones, state.m_valid_probe, v_hash_mask, hash_table->entries, 8);
+    state.v_bucket_addrs = _mm512_mask_i64gather_epi64(v_all_ones, state.m_valid_probe, v_hash_mask, (long long int*)hash_table->entries, 8);
 
     while (state.m_valid_probe != 0) {
       /// step 5: gather the all new build keys
@@ -543,9 +543,9 @@ size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::In
           _mm_prefetch((((char* )(l_discount+cur))+PDIS), _MM_HINT_T0);
           _mm_prefetch((((char* )(l_discount+cur))+PDIS+64), _MM_HINT_T0);
 #endif
-          v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid_probe, state[k].v_probe_offset, (void* )probe_keys, 4);
+          v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const int* )probe_keys, 4);
           state[k].v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
-          state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (void* )probe_value, 8);
+          state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int* )probe_value, 8);
           /// step 3: compute hash values
           state[k].v_probe_hash = runtime::MurMurHash()((state[k].v_probe_keys), (v_seed));
         } else {
@@ -554,7 +554,7 @@ size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::In
           _mm_prefetch((((char* )(entry_addrs[cur+PDISD]))+64), _MM_HINT_T0);
 #endif
           // gather the addresses of entries
-          state[k].v_probe_offset = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, entry_addrs, 8);
+          state[k].v_probe_offset = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int*)entry_addrs, 8);
           v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid_probe, state[k].v_probe_offset + u_offset_k, nullptr, 1);
           state[k].v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
           state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset+u_offset_v, nullptr, 1);
@@ -579,17 +579,17 @@ size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::In
         if (nullptr == entry_addrs) {
           insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
-          _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
+          _mm512_mask_i64scatter_epi64((long long int*)hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
         } else {
           // set the next of entries = 0
           _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset, v_zero, 1);
-          _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, state[k].v_probe_offset, 8);
+          _mm512_mask_i64scatter_epi64((long long int*)hash_table->entries, m_no_conflict, v_hash_mask, state[k].v_probe_offset, 8);
           _mm512_mask_compressstoreu_epi64((results_entry + found), m_no_conflict, state[k].v_probe_offset);
         }
         found += _mm_popcnt_u32(m_no_conflict);
         // get rid of no-conflict elements
         state[k].m_valid_probe = _mm512_kandn(m_no_conflict, state[k].m_valid_probe);
-        state[k].v_bucket_addrs = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_valid_probe, v_hash_mask, hash_table->entries, 8);
+        state[k].v_bucket_addrs = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_valid_probe, v_hash_mask, (const long long int*)hash_table->entries, 8);
 #if 0
         v_prefetch(state[k].v_bucket_addrs);
         state[k].stage = 0;
@@ -782,9 +782,9 @@ size_t agg_imv_hybrid(size_t begin, size_t end, Database& db, Hashmapx<types::In
           _mm_prefetch((((char* )(l_discount+cur))+PDIS), _MM_HINT_T0);
           _mm_prefetch((((char* )(l_discount+cur))+PDIS+64), _MM_HINT_T0);
 #endif
-          v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid_probe, state[k].v_probe_offset, (void* )probe_keys, 4);
+          v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const int* )probe_keys, 4);
           state[k].v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
-          state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (void* )probe_value, 8);
+          state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int* )probe_value, 8);
           /// step 3: compute hash values
           state[k].v_probe_hash = runtime::MurMurHash()((state[k].v_probe_keys), (v_seed));
         } else {
@@ -793,7 +793,7 @@ size_t agg_imv_hybrid(size_t begin, size_t end, Database& db, Hashmapx<types::In
           _mm_prefetch((((char* )(entry_addrs[cur+PDISD]))+64), _MM_HINT_T0);
 #endif
           // gather the addresses of entries
-          state[k].v_probe_offset = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, entry_addrs, 8);
+          state[k].v_probe_offset = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int *)entry_addrs, 8);
           v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid_probe, state[k].v_probe_offset + u_offset_k, nullptr, 1);
           state[k].v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
           state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset+u_offset_v, nullptr, 1);
@@ -821,17 +821,17 @@ size_t agg_imv_hybrid(size_t begin, size_t end, Database& db, Hashmapx<types::In
         if (nullptr == entry_addrs) {
           insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition,  u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
-          _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
+          _mm512_mask_i64scatter_epi64((long long int*)hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
         } else {
           // set the next of entries = 0
           _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset, v_zero, 1);
-          _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, state[k].v_probe_offset, 8);
+          _mm512_mask_i64scatter_epi64((long long int*)hash_table->entries, m_no_conflict, v_hash_mask, state[k].v_probe_offset, 8);
           _mm512_mask_compressstoreu_epi64((results_entry + found), m_no_conflict, state[k].v_probe_offset);
         }
         found += _mm_popcnt_u32(m_no_conflict);
         // get rid of no-conflict elements
         state[k].m_valid_probe = _mm512_kandn(m_no_conflict, state[k].m_valid_probe);
-        state[k].v_bucket_addrs = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_valid_probe, v_hash_mask, hash_table->entries, 8);
+        state[k].v_bucket_addrs = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_valid_probe, v_hash_mask, (const long long int*)hash_table->entries, 8);
 #if 0
         v_prefetch(state[k].v_bucket_addrs);
         state[k].stage = 0;
@@ -1021,9 +1021,9 @@ size_t agg_imv1(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
           _mm_prefetch((((char* )(l_discount+cur))+PDIS), _MM_HINT_T0);
           _mm_prefetch((((char* )(l_discount+cur))+PDIS+64), _MM_HINT_T0);
 #endif
-          v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid_probe, state[k].v_probe_offset, (void* )probe_keys, 4);
+          v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const int* )probe_keys, 4);
           state[k].v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
-          state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (void* )probe_value, 8);
+          state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int* )probe_value, 8);
           /// step 3: compute hash values
           state[k].v_probe_hash = runtime::MurMurHash()((state[k].v_probe_keys), (v_seed));
         } else {
@@ -1032,7 +1032,7 @@ size_t agg_imv1(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
           _mm_prefetch((((char* )(entry_addrs[cur+PDISD]))+64), _MM_HINT_T0);
 #endif
           // gather the addresses of entries
-          state[k].v_probe_offset = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, entry_addrs, 8);
+          state[k].v_probe_offset = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int*)entry_addrs, 8);
           v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid_probe, state[k].v_probe_offset + u_offset_k, nullptr, 1);
           state[k].v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
           state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset+u_offset_v, nullptr, 1);
@@ -1060,17 +1060,17 @@ size_t agg_imv1(size_t begin, size_t end, Database& db, Hashmapx<types::Integer,
         if (nullptr == entry_addrs) {
           insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition,  u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
-          _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
+          _mm512_mask_i64scatter_epi64((long long int*)hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
         } else {
           // set the next of entries = 0
           _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset, v_zero, 1);
-          _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, state[k].v_probe_offset, 8);
+          _mm512_mask_i64scatter_epi64((long long int*)hash_table->entries, m_no_conflict, v_hash_mask, state[k].v_probe_offset, 8);
           _mm512_mask_compressstoreu_epi64((results_entry + found), m_no_conflict, state[k].v_probe_offset);
         }
         found += _mm_popcnt_u32(m_no_conflict);
         // get rid of no-conflict elements
         state[k].m_valid_probe = _mm512_kandn(m_no_conflict, state[k].m_valid_probe);
-        state[k].v_bucket_addrs = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_valid_probe, v_hash_mask, hash_table->entries, 8);
+        state[k].v_bucket_addrs = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_valid_probe, v_hash_mask, (const long long int*)hash_table->entries, 8);
 #if 0
         v_prefetch(state[k].v_bucket_addrs);
         state[k].stage = 0;
@@ -1262,9 +1262,9 @@ size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::In
           _mm_prefetch((((char* )(l_discount+cur))+PDIS), _MM_HINT_T0);
           _mm_prefetch((((char* )(l_discount+cur))+PDIS+64), _MM_HINT_T0);
 #endif
-          v256_probe_keys = _mm512_mask_i64gather_epi32(v256_all_one, state[k].m_valid_probe, state[k].v_probe_offset, (void* )probe_keys, 4);
+          v256_probe_keys = _mm512_mask_i64gather_epi32(v256_all_one, state[k].m_valid_probe, state[k].v_probe_offset, (const int* )probe_keys, 4);
           state[k].v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
-          state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (void* )probe_value, 8);
+          state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int* )probe_value, 8);
           /// step 3: compute hash values
           state[k].v_probe_hash = runtime::MurMurHash()((state[k].v_probe_keys), (v_seed));
         } else {
@@ -1273,7 +1273,7 @@ size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::In
           _mm_prefetch((((char* )(entry_addrs[cur+PDISD]))+64), _MM_HINT_T0);
 #endif
           // gather the addresses of entries
-          state[k].v_probe_offset = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, entry_addrs, 8);
+          state[k].v_probe_offset = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int*)entry_addrs, 8);
           v256_probe_keys = _mm512_mask_i64gather_epi32(v256_all_one, state[k].m_valid_probe, state[k].v_probe_offset + u_offset_k, nullptr, 1);
           state[k].v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
           state[k].v_probe_value = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset+u_offset_v, nullptr, 1);
@@ -1300,7 +1300,7 @@ size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::In
         if (nullptr == entry_addrs) {
           insertAllNewEntry(state[k], u_new_addrs, v_conflict, m_to_insert, m_no_conflict, partition,  u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
           // insert the new addresses to the hash table
-          _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
+          _mm512_mask_i64scatter_epi64((long long int*)hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
         } else {
           // set the next of entries = 0
           _mm512_mask_i64scatter_epi64(nullptr, m_to_insert, state[k].v_probe_offset, v_zero, 1);
@@ -1309,13 +1309,13 @@ size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::In
           v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
           v_previous = _mm512_maskz_permutexvar_epi64(_mm512_kandn(m_no_conflict, m_to_insert), v_lzeros, state[k].v_probe_offset);
           _mm512_mask_i64scatter_epi64(0, _mm512_kandn(m_no_conflict, m_to_insert), v_previous, state[k].v_probe_offset, 1);
-          _mm512_mask_i64scatter_epi64(hash_table->entries, m_no_conflict, v_hash_mask, state[k].v_probe_offset, 8);
+          _mm512_mask_i64scatter_epi64((long long int*)hash_table->entries, m_no_conflict, v_hash_mask, state[k].v_probe_offset, 8);
           _mm512_mask_compressstoreu_epi64((results_entry + found), m_to_insert, state[k].v_probe_offset);
         }
         found += _mm_popcnt_u32(m_to_insert);
         // get rid of no-conflict elements
         state[k].m_valid_probe = _mm512_kandn(m_to_insert, state[k].m_valid_probe);
-        state[k].v_bucket_addrs = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_valid_probe, v_hash_mask, hash_table->entries, 8);
+        state[k].v_bucket_addrs = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_valid_probe, v_hash_mask, (const long long int*)hash_table->entries, 8);
         state[k].v_probe_keys = _mm512_mask_blend_epi64(state[k].m_valid_probe, v_all_ones, state[k].v_probe_keys);
 
 #if 0

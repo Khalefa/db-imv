@@ -179,8 +179,8 @@ size_t pipeline_imv_q1x(size_t begin, size_t end, Database& db, runtime::Hashmap
         _mm256_mask_compressstoreu_epi32((output_probe + pos), m_match, _mm512_cvtepi64_epi32(imv_state[k].v_probe_offset));
         pos += _mm_popcnt_u32(m_match);
 #else
-        v_price = _mm512_mask_i64gather_epi64(v_zero, imv_state[k].m_valid_probe, imv_state[k].v_probe_offset, lo_extendedprice, 8);
-        v_discount = _mm512_mask_i64gather_epi64(v_zero, imv_state[k].m_valid_probe, imv_state[k].v_probe_offset, lo_discount, 8);
+        v_price = _mm512_mask_i64gather_epi64(v_zero, imv_state[k].m_valid_probe, imv_state[k].v_probe_offset, (const long long int*)lo_extendedprice, 8);
+        v_discount = _mm512_mask_i64gather_epi64(v_zero, imv_state[k].m_valid_probe, imv_state[k].v_probe_offset, (const long long int*)lo_discount, 8);
         v_price = _mm512_mullo_epi64(v_price, v_discount);
         v_results = _mm512_mask_add_epi64(v_results, m_match, v_price, v_results);
         imv_state[k].m_valid_probe = _mm512_kandn(m_match, imv_state[k].m_valid_probe);

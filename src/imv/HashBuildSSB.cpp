@@ -19,7 +19,7 @@ size_t build_imv_q1x(size_t begin, size_t end, Database& db, runtime::Hashmap* h
   __m256i v256_zero = _mm256_set1_epi32(0), v256_build_key,v256_year;
   v_base_entry_off = _mm512_mullo_epi64(v_base_offset, _mm512_set1_epi64(entry_size));
   uint64_t* hash_value = nullptr;
-  void* build_keys = (void*) d_datekey;
+  const int* build_keys = (const int*) d_datekey;
 
   BuildSIMDState state[stateNumSIMD + 1];
   BuildSIMDState& RVS = state[stateNumSIMD];
@@ -47,7 +47,7 @@ size_t build_imv_q1x(size_t begin, size_t end, Database& db, runtime::Hashmap* h
         v_offset = _mm512_add_epi64(_mm512_set1_epi64(cur), v_base_offset);
         state[k].m_valid = _mm512_cmpgt_epu64_mask(v_offset_upper, v_offset);
         v256_build_key = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid, v_offset, build_keys, 4);
-        v256_year = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid, v_offset, d_year, 4);
+        v256_year = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid, v_offset, (const int*)d_year, 4);
         state[k].v_build_key = _mm512_cvtepi32_epi64(v256_build_key);
         cur += VECTORSIZE;
         /// filter

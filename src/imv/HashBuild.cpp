@@ -100,7 +100,7 @@ size_t build_simd(size_t begin, size_t end, Database& db, runtime::Hashmap* hash
       m_valid_build = (m_valid_build >> (i - end));
       valid_size = end + VECTORSIZE - i;
     }
-    auto v256_build_key = _mm512_mask_i64gather_epi32(v256_zero, m_valid_build, v_offset, o_orderkey, 4);
+    auto v256_build_key = _mm512_mask_i64gather_epi32(v256_zero, m_valid_build, v_offset, (const int*)o_orderkey, 4);
     v_build_key = _mm512_cvtepi32_epi64(v256_build_key);
 
     /// step 2: allocate new entries
@@ -176,7 +176,7 @@ size_t build_imv(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_
           m_valid_build = (m_valid_build >> (cur - end));
           valid_size = end + VECTORSIZE - cur;
         }
-        v256_build_key = _mm512_mask_i64gather_epi32(v256_zero, m_valid_build, v_offset, o_orderkey, 4);
+        v256_build_key = _mm512_mask_i64gather_epi32(v256_zero, m_valid_build, v_offset, (const int*)o_orderkey, 4);
         v_build_key = _mm512_cvtepi32_epi64(v256_build_key);
 
         /// step 2: allocate new entries

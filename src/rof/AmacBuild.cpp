@@ -71,7 +71,7 @@ size_t imv_build_q11_date(size_t begin, size_t end, Database& db, runtime::Hashm
         /// step 1: gather build keys (using gather to compilate with loading discontinuous values)
         v_offset = _mm512_add_epi64(_mm512_set1_epi64(cur), v_base_offset);
         state[k].m_valid = _mm512_cmpgt_epu64_mask(v_offset_upper, v_offset);
-        v256_build_key = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid, v_offset, o_orderkey, 4);
+        v256_build_key = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid, v_offset, (const int*)o_orderkey, 4);
         state[k].v_build_key = _mm512_cvtepi32_epi64(v256_build_key);
         cur += VECTORSIZE;
 
