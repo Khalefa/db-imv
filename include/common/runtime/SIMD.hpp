@@ -4,7 +4,7 @@
 #include <iostream>
 #include <ostream>
 #include <vector>
-
+#include "avx512vl.hpp"
 struct Vec8u {
    union {
       __m512i reg;

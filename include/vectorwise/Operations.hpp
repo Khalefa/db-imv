@@ -4,7 +4,7 @@
 #include <functional>
 #include <memory>
 #include <vector>
-
+#include "avx512vl.hpp"
 namespace vectorwise {
 
 // TODO: Put a class hierarchy into functions: Operation, Aggregate, Scatter,

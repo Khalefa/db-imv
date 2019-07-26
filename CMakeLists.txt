@@ -24,13 +24,18 @@ OPTION(AVX512EXPERIMENTS ON)
 OPTION(HARDWARE_BENCHMARKS ON)
 OPTION(INTERPRET_SEPARATE OFF)
 OPTION(HASH_SIZE_32 OFF)
+OPTION(KNL OFF)
 
 
 #-mtune=native -g
 # Compiler flags for the different targets
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=skylake-avx512 -mtune=native -std=c++14 -fPIC -w -Wextra -Wno-psabi  -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -w -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
-
+if(KNL)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -mtune=native -std=c++14 -g -fPIC -w -Wextra -Wno-psabi  -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512pf -mavx512er -mavx512cd -mavx2 -mbmi2 -mavx")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -w -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512pf -mavx512er -mavx512cd -mavx2 -mbmi2 -mavx -fpermissive")
+else()
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=skylake-avx512 -g -mtune=native -std=c++14 -fPIC -w -Wextra -Wno-psabi  -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -w -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx -fpermissive")
+endif(KNL)
 
 if(LINUX)
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -static-libasan")
@@ -64,6 +69,12 @@ IF(HASH_SIZE_32)
   ADD_DEFINITIONS(-DHASH_SIZE=32)
 ELSE()
   ADD_DEFINITIONS(-DHASH_SIZE=64)
+ENDIF()
+
+IF(KNL)
+	ADD_DEFINITIONS(-DKNL=1)
+ELSE()
+	ADD_DEFINITIONS(-DKNL=0)
 ENDIF()
 
 
@@ -338,9 +349,7 @@ if(AVX512EXPERIMENTS)
   add_executable(run_join
     src/benchmarks/primitives/joinmicrobench.cpp
     )
-  SET_TARGET_PROPERTIES(run_join PROPERTIES
-    COMPILE_FLAGS "-march=skylake-avx512"
-    )
+
   target_include_directories(run_join PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
