@@ -1,7 +1,12 @@
 #pragma once
 #include "head.hpp"
-#define ORDERKEY 1
-
+#define ORDERKEY 0
+#if ORDERKEY
+#define HT_SIZE 1500000
+#else
+#define HT_SIZE 2000000
+#define PARTITION_SIZE 1024
+#endif
 struct AMACState {
   uint8_t stage;
   int probeKey = 0;
@@ -77,18 +82,18 @@ inline void write_results(int* o_key, uint64_t* o_value, void** results, size_t 
 }
 
 size_t agg_raw(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
-               PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
+               PartitionedDeque<PARTITION_SIZE>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
 size_t agg_amac(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
-                PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
+                PartitionedDeque<PARTITION_SIZE>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
 size_t agg_gp(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
-              PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
+              PartitionedDeque<PARTITION_SIZE>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
 size_t agg_simd(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
-                PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
+                PartitionedDeque<PARTITION_SIZE>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
 size_t agg_imv_hybrid(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
-               PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
+               PartitionedDeque<PARTITION_SIZE>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
 size_t agg_imv1(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
-               PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
+               PartitionedDeque<PARTITION_SIZE>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
 size_t agg_imv_serial(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
-               PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
+               PartitionedDeque<PARTITION_SIZE>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
 size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::Integer, types::Numeric<12, 2>, hashFun, false>* hash_table,
-               PartitionedDeque<1024>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);
+               PartitionedDeque<PARTITION_SIZE>* partition, void** entry_addrs = nullptr, void** results_entry = nullptr);

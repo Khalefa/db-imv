@@ -1,4 +1,6 @@
 #pragma once
+#include <unistd.h>
+
 #include "benchmarks/tpch/Queries.hpp"
 #include "common/runtime/Hash.hpp"
 #include "common/runtime/Types.hpp"
@@ -210,7 +212,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
   /// Memory for materialized entries in hashmap
   tbb::enumerable_thread_specific<runtime::Stack<group_t>> entries;
   /// Memory for spilling hastable entries
-  tbb::enumerable_thread_specific<runtime::PartitionedDeque<1024>> partitionedDeques;
+  tbb::enumerable_thread_specific<runtime::PartitionedDeque<PARTITION_SIZE>> partitionedDeques;
   /// globally collect entry addresses
   tbb::enumerable_thread_specific<vector<group_t*>> entry_addrs;
   tbb::enumerable_thread_specific<vector<group_t*>> results_addrs;
@@ -220,49 +222,40 @@ bool agg_intkey(Database& db, size_t nrThreads) {
     auto found = f;
     bool exist=false;
     auto& ht = hash_table.local(exist);
-    //   auto& localEntries = entries.local();
 
-                                     if(!exist) {
-#if ORDERKEY
-                                     ht.setSize(150000);
-#else
-                                     ht.setSize(100000);
+    if(!exist) {
+      ht.setSize(HT_SIZE);
 
-#endif
-                                   }
-                                   auto& partition = partitionedDeques.local(exist);
-                                   if(!exist) {
-                                     partition.postConstruct(nrThreads * 4, sizeof(group_t));
-                                   }
-                                   found += aggFun(r.begin(),r.end(),db,&ht,&partition,nullptr,nullptr);
-                                   return found;
-                                 },
+    }
+    auto& partition = partitionedDeques.local(exist);
+    if(!exist) {
+      partition.postConstruct(nrThreads * 4, sizeof(group_t));
+    }
+    found += aggFun(r.begin(),r.end(),db,&ht,&partition,nullptr,nullptr);
+    //  ht.printSta();
+                                     return found;
+                                   },
                                      add);
   cout << "local agg num = " << found2 << endl;
 
 // global aggregation: each thread process some partitions
 // aggregate from spill partitions
   auto nrPartitions = partitionedDeques.begin()->getPartitions().size();
-#if 0
+#if 01
   tbb::parallel_for(0ul, nrPartitions, [&](auto partitionNr) {
     bool exist=false;
     auto& ht = hash_table.local(exist);
-    //   auto& localEntries = entries.local();
 
-                    if(!exist) {
-#if ORDERKEY
-                    ht.setSize(1500000);
-#else
-                    ht.setSize(100000);
+    if(!exist) {
+      ht.setSize(HT_SIZE);
 
-#endif
-                  }
-                  ht.clear();
-                  auto& partition = partitionedDeques.local(exist);
-                  if(!exist) {
-                    partition.postConstruct(nrThreads * 4, sizeof(group_t));
-                  }
-                  /* aggregate values from all deques for partitionNr     */
+    }
+    ht.clear();
+    auto& partition = partitionedDeques.local(exist);
+    if(!exist) {
+      partition.postConstruct(nrThreads * 4, sizeof(group_t));
+    }
+    /* aggregate values from all deques for partitionNr     */
 #if 0
                     auto& localEntries = entries.local();
                     localEntries.clear();
@@ -320,29 +313,29 @@ bool agg_intkey(Database& db, size_t nrThreads) {
                         for (auto value = chunk->template data<group_t>(), end = value + partition.size(chunk, sizeof(group_t)); value < end; value++) {
                           //    if(value->k>agg_constrant) continue;
 
-      entry_addrs_.push_back(value);
-    }
-  }
-}
-results_addrs_.resize(entry_addrs_.size());
-auto found = aggFun(0,entry_addrs_.size(),db,&ht,nullptr,(void**)&entry_addrs_[0],(void**)&results_addrs_[0]);
-if(found>0) {
-  auto block = result->createBlock(found);
-  auto ret = reinterpret_cast<types::Integer*>(block.data(retAttr));
-  auto disc = reinterpret_cast<types::Numeric<12, 2>*>(block.data(discountAttr));
+                    entry_addrs_.push_back(value);
+                  }
+                }
+              }
+              results_addrs_.resize(entry_addrs_.size());
+              auto found = aggFun(0,entry_addrs_.size(),db,&ht,nullptr,(void**)&entry_addrs_[0],(void**)&results_addrs_[0]);
+              if(found>0) {
+                auto block = result->createBlock(found);
+                auto ret = reinterpret_cast<types::Integer*>(block.data(retAttr));
+                auto disc = reinterpret_cast<types::Numeric<12, 2>*>(block.data(discountAttr));
 #if 0
-      write_results((int*)ret,(uint64_t*)disc,(void**)&results_addrs_[0],found);
+                    write_results((int*)ret,(uint64_t*)disc,(void**)&results_addrs_[0],found);
 #else
-      for(int i=0;i<found;++i) {
-        *ret++ = results_addrs_[i]->k;
-        *disc++ = results_addrs_[i]->v;
-      }
+                    for(int i=0;i<found;++i) {
+                      *ret++ = results_addrs_[i]->k;
+                      *disc++ = results_addrs_[i]->v;
+                    }
 #endif
-      block.addedElements(found);
-    }
+                    block.addedElements(found);
+                  }
 
 #endif
-    });
+                  });
 //  printResult(resources.query->result.get());
 #endif
   leaveQuery(nrThreads);
@@ -351,9 +344,10 @@ if(found>0) {
 void test_agg(Database& db, size_t nrThreads) {
   vector<pair<string, decltype(aggFun)> > agg_name2fun;
   // agg_name2fun.push_back(make_pair("agg_simd", agg_simd));
+ // sleep(10);
   agg_name2fun.push_back(make_pair("agg_imv_merged", agg_imv_merged));
   agg_name2fun.push_back(make_pair("agg_imv_hybrid", agg_imv_hybrid));
-  agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
+//  agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
   agg_name2fun.push_back(make_pair("agg_imv_serial", agg_imv_serial));
   agg_name2fun.push_back(make_pair("agg_gp", agg_gp));
   agg_name2fun.push_back(make_pair("agg_amac", agg_amac));
@@ -562,7 +556,7 @@ repetitions);
                                      ht1.setSize(found1);
                                      parallel_insert(entries1, ht1);
                                      cout << "Build hash table tuples num = " << found1 << endl;
-                                     ht1.printSta();
+                                     ht1.printStaTag();
                                      uint32_t probe_off[morselSize];
                                      void* build_add[morselSize];
 
@@ -625,12 +619,12 @@ bool pipeline(Database& db, size_t nrThreads) {
     auto& entries = entries1.local();
     for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
       //if(o_orderdate[i] < pipeline_date) {
-        entries.emplace_back(ht1.hash(o_orderkey[i]), o_orderkey[i]);
-        found++;
-    //  }
-    }
-    return found;
-  },
+                                     entries.emplace_back(ht1.hash(o_orderkey[i]), o_orderkey[i]);
+                                     found++;
+                                     //  }
+                                   }
+                                   return found;
+                                 },
                                      add);
 
   ht1.setSize(found1);
@@ -843,7 +837,7 @@ int main(int argc, char* argv[]) {
 //pipeline(tpch, nrThreads);
 //join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
-test_agg(tpch, nrThreads);
+  test_agg(tpch, nrThreads);
 
 // test_vectorwise_probe(tpch, nrThreads);
 // test_vectorwise_sel_probe(tpch, nrThreads);

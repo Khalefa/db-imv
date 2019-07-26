@@ -84,6 +84,7 @@ class Hashmap {
   Hashmap(const Hashmap&) = delete;
   inline ~Hashmap();
   inline void printSta();
+  inline void printStaTag();
   inline Vec8u update(Vec8u old,Vec8u p,Vec8u hash);
   inline Vec8u ptr(Vec8u p);
   inline Hashmap::EntryHeader* update(Hashmap::EntryHeader* old,
@@ -109,6 +110,23 @@ inline void Hashmap::printSta() {
   std::map<uint64_t, uint64_t> len_num;
   for (uint64_t i = 0; i < capacity; ++i) {
     auto len = 0;
+    auto en = find_chain(i);
+    while (nullptr != en) {
+      ++len;
+      en = en->next;
+    }
+    ++len_num[len];
+  }
+  for (auto it = len_num.begin(); it != len_num.end(); ++it) {
+    if (it->second > 0) {
+      std::cout << "len = " << it->first << ", num = " << it->second << std::endl;
+    }
+  }
+}
+inline void Hashmap::printStaTag() {
+  std::map<uint64_t, uint64_t> len_num;
+  for (uint64_t i = 0; i < capacity; ++i) {
+    auto len = 0;
     auto en = find_chain_tagged(i);
     while (nullptr != en) {
       ++len;
@@ -122,7 +140,6 @@ inline void Hashmap::printSta() {
     }
   }
 }
-
 inline Hashmap::ptr_t Hashmap::tag(Hashmap::hash_t hash) {
   auto tagPos = hash >> (sizeof(hash_t) * 8 - 4);
   return ((size_t) 1) << (tagPos + (sizeof(ptr_t) * 8 - 16));
