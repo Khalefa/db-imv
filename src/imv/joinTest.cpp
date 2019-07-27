@@ -664,6 +664,8 @@ bool pipeline(Database& db, size_t nrThreads) {
 
   auto& ord = db["orders"];
   auto& li = db["lineitem"];
+  auto& part = db["part"];
+  auto p_partkey = part["p_partkey"].data<types::Integer>();
 
   auto o_orderkey = ord["o_orderkey"].data<types::Integer>();
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
@@ -678,12 +680,21 @@ bool pipeline(Database& db, size_t nrThreads) {
 // build a hash table from [orders]
   Hashset<types::Integer, hash> ht1;
   tbb::enumerable_thread_specific<runtime::Stack<decltype(ht1)::Entry>> entries1;
-  auto found1 = tbb::parallel_reduce(range(0, ord.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+#if PIPELINE_ORDERED
+  size_t tuples = ord.nrTuples;
+#else
+  size_t tuples = part.nrTuples;
+#endif
+  auto found1 = tbb::parallel_reduce(range(0, tuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
     auto found = f;
     auto& entries = entries1.local();
     for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
       if(o_orderdate[i] < pipeline_date) {
+#if PIPELINE_ORDERED
         entries.emplace_back(ht1.hash(o_orderkey[i]), o_orderkey[i]);
+#else
+        entries.emplace_back(ht1.hash(p_partkey[i]), p_partkey[i]);
+#endif
         found++;
       }
     }

@@ -40,7 +40,11 @@ size_t filter_probe_simd_amac(size_t begin, size_t end, Database& db, runtime::H
   size_t found = 0;
   auto& li = db["lineitem"];
   auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
+#if PIPELINE_ORDERED
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
+#else
+  auto l_orderkey = li["l_partkey"].data<types::Integer>();
+#endif
 #if 0
   for (size_t i = begin, size = 0; i < end; ) {
     size = i + ROF_VECTOR_SIZE < end ? ROF_VECTOR_SIZE : end -i;
@@ -60,7 +64,11 @@ size_t filter_probe_scalar(size_t begin, size_t end, Database& db, runtime::Hash
   size_t found = 0, pos = 0;
   auto& li = db["lineitem"];
   auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
+#if PIPELINE_ORDERED
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
+#else
+  auto l_orderkey = li["l_partkey"].data<types::Integer>();
+#endif
   int build_key_off = sizeof(runtime::Hashmap::EntryHeader);
   for (size_t i = begin, size = 0; i < end; ++i) {
     if (constrants > l_quantity_col[i].value) {
@@ -89,7 +97,11 @@ size_t filter_probe_simd_gp(size_t begin, size_t end, Database& db, runtime::Has
   size_t found = 0;
   auto& li = db["lineitem"];
   auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
+#if PIPELINE_ORDERED
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
+#else
+  auto l_orderkey = li["l_partkey"].data<types::Integer>();
+#endif
 
   for (size_t i = begin, size = 0; i < end;) {
     size = scan_filter_simd(l_quantity_col, i, end, constrants, pos_buff);
@@ -101,7 +113,11 @@ size_t filter_probe_simd_imv(size_t begin, size_t end, Database& db, runtime::Ha
   size_t found = 0;
   auto& li = db["lineitem"];
   auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
+#if PIPELINE_ORDERED
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
+#else
+  auto l_orderkey = li["l_partkey"].data<types::Integer>();
+#endif
 #if 0
   for (size_t i = begin, size = 0; i < end; ) {
     size = i + ROF_VECTOR_SIZE < end ? ROF_VECTOR_SIZE : end -i;
@@ -122,7 +138,11 @@ size_t filter_probe_simd_imv(size_t begin, size_t end, Database& db, runtime::Ha
 size_t filter_probe_imv1(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff) {
   auto& li = db["lineitem"];
   auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
+#if PIPELINE_ORDERED
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
+#else
+  auto l_orderkey = li["l_partkey"].data<types::Integer>();
+#endif
 
   ///////////////////////////////
   auto probe_keys = l_orderkey;
@@ -305,7 +325,11 @@ size_t filter_probe_imv1(size_t begin, size_t end, Database& db, runtime::Hashma
 size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff) {
   auto& li = db["lineitem"];
   auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
+#if PIPELINE_ORDERED
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
+#else
+  auto l_orderkey = li["l_partkey"].data<types::Integer>();
+#endif
 
   ///////////////////////////////
   auto probe_keys = l_orderkey;
@@ -559,7 +583,11 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
 size_t filter_probe_imv2(size_t begin, size_t end, Database& db, runtime::Hashmap* hash_table, void** output_build, uint32_t*output_probe, uint64_t* pos_buff) {
   auto& li = db["lineitem"];
   auto l_quantity_col = li["l_quantity"].data<types::Numeric<12, 2>>();
+#if PIPELINE_ORDERED
   auto l_orderkey = li["l_orderkey"].data<types::Integer>();
+#else
+  auto l_orderkey = li["l_partkey"].data<types::Integer>();
+#endif
 
   ///////////////////////////////
   auto probe_keys = l_orderkey;
