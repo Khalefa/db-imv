@@ -516,7 +516,7 @@ repetitions);
       return true;
     }
 
-bool probe_test(Database& db, size_t nrThreads)
+    bool probe_test(Database& db, size_t nrThreads)
 {
 
   auto resources = initQuery(nrThreads);
@@ -588,8 +588,7 @@ bool probe_test(Database& db, size_t nrThreads)
   return true;
 }
 
-bool probe_test_disorder(Database& db, size_t nrThreads)
-{
+bool probe_test_disorder(Database& db, size_t nrThreads) {
 
   auto resources = initQuery(nrThreads);
   auto c1 = types::Date::castString("1994-01-01");
@@ -598,7 +597,6 @@ bool probe_test_disorder(Database& db, size_t nrThreads)
   auto& part = db["part"];
   auto p_partkey = part["p_partkey"].data<types::Integer>();
   auto l_partkey = li["l_partkey"].data<types::Integer>();
-
 
   //  using hash = runtime::CRC32Hash;
   using hash = runtime::MurMurHash;
@@ -684,19 +682,19 @@ bool pipeline(Database& db, size_t nrThreads) {
     auto found = f;
     auto& entries = entries1.local();
     for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
-      //if(o_orderdate[i] < pipeline_date) {
-                                     entries.emplace_back(ht1.hash(o_orderkey[i]), o_orderkey[i]);
-                                     found++;
-                                     //  }
-                                   }
-                                   return found;
-                                 },
+      if(o_orderdate[i] < pipeline_date) {
+        entries.emplace_back(ht1.hash(o_orderkey[i]), o_orderkey[i]);
+        found++;
+      }
+    }
+    return found;
+  },
                                      add);
 
   ht1.setSize(found1);
   parallel_insert(entries1, ht1);
   cout << "Build hash table tuples num = " << found1 << endl;
-  ht1.printSta();
+  ht1.printStaTag();
   uint32_t probe_off[morselSize];
   void* build_add[morselSize];
 #if 0
@@ -899,9 +897,9 @@ int main(int argc, char* argv[]) {
     nrThreads = atoi(argv[3]);
 
   tbb::task_scheduler_init scheduler(nrThreads);
-  probe_test(tpch, nrThreads);
+//  probe_test(tpch, nrThreads);
 //  probe_test_disorder(tpch, nrThreads);
-//pipeline(tpch, nrThreads);
+  pipeline(tpch, nrThreads);
 //join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
 //   test_agg(tpch, nrThreads);

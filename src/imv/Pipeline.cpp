@@ -132,7 +132,7 @@ size_t filter_probe_imv1(size_t begin, size_t end, Database& db, runtime::Hashma
   // extra 2 for residual vectorized states
   IMVState* imv_state = new IMVState[vectorwise::Hashjoin::imvNum + 2];
 
-  __attribute__((aligned(64)))       __mmask8 m_match = 0, m_new_probes = -1, mask[VECTORSIZE + 1];
+  __attribute__((aligned(64)))         __mmask8 m_match = 0, m_new_probes = -1, mask[VECTORSIZE + 1];
 
   __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0);
   __m512i v_offset = _mm512_set1_epi64(0), v_new_build_key, v_build_keys;
@@ -233,7 +233,7 @@ size_t filter_probe_imv1(size_t begin, size_t end, Database& db, runtime::Hashma
         imv_state[k].m_valid_probe = _mm512_kand(imv_state[k].m_valid_probe, v_new_bucket_addrs.mask);
         imv_state[k].v_bucket_addrs = v_new_bucket_addrs.vec;
         imv_state[k].stage = 0;
-       v_prefetch(imv_state[k].v_bucket_addrs);
+        v_prefetch(imv_state[k].v_bucket_addrs);
 
       }
         break;
@@ -314,7 +314,7 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
       curProbe;
   IMVState* imv_state = new IMVState[vectorwise::Hashjoin::imvNum + 2];
 
-  __attribute__((aligned(64)))       __mmask8 m_match = 0, m_new_probes = -1, mask[VECTORSIZE + 1];
+  __attribute__((aligned(64)))         __mmask8 m_match = 0, m_new_probes = -1, mask[VECTORSIZE + 1];
 
   __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0);
   __m512i v_offset = _mm512_set1_epi64(0), v_new_build_key, v_build_keys;
@@ -398,6 +398,9 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
         num = _mm_popcnt_u32(imv_state[k].m_valid_probe);
         if (num == VECTORSIZE || done >= imvNum) {
           imv_state[k].stage = 4;
+        } else if (num == 0) {
+          --k;
+          break;
         } else {
           num_temp = _mm_popcnt_u32(imv_state[imvNum1].m_valid_probe);
           if (num + num_temp < VECTORSIZE) {
@@ -422,8 +425,8 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
             imv_state[k].stage = 4;
           }
         }
-         --k;
-          break;
+        --k;
+        break;
 #endif
       }
         break;
@@ -440,9 +443,46 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
         Vec8uM v_new_bucket_addrs = hash_table->find_chain_tagged((imv_state[k].v_probe_hash));
         imv_state[k].m_valid_probe = _mm512_kand(imv_state[k].m_valid_probe, v_new_bucket_addrs.mask);
         imv_state[k].v_bucket_addrs = v_new_bucket_addrs.vec;
+#if 0
         imv_state[k].stage = 0;
         v_prefetch(imv_state[k].v_bucket_addrs);
-
+#else
+        num = _mm_popcnt_u32(imv_state[k].m_valid_probe);
+        if (num == 0) {
+          imv_state[k].stage = 1;
+          --k;
+        } else if (num == VECTORSIZE) {
+          imv_state[k].stage = 0;
+          v_prefetch(imv_state[k].v_bucket_addrs);
+        } else {
+          if ((done < imvNum) || (imv_state[imvNum1].m_valid_probe > 0)) {
+            num_temp = _mm_popcnt_u32(imv_state[imvNum].m_valid_probe);
+            if (num + num_temp < VECTORSIZE) {
+              // compress imv_state[k]
+              compress(&imv_state[k]);
+              // expand imv_state[k] -> imv_state[imvNum]
+              expand(&imv_state[k], &imv_state[imvNum]);
+              imv_state[imvNum].m_valid_probe = mask[num + num_temp];
+              imv_state[k].m_valid_probe = 0;
+              imv_state[k].stage = 1;
+              imv_state[imvNum].stage = 0;
+              --k;
+              break;
+            } else {
+              // expand imv_state[imvNum] -> expand imv_state[k]
+              expand(&imv_state[imvNum], &imv_state[k]);
+              imv_state[imvNum].m_valid_probe = _mm512_kand(imv_state[imvNum].m_valid_probe, _mm512_knot(mask[VECTORSIZE - num]));
+              // compress imv_state[imvNum]
+              compress(&imv_state[imvNum]);
+              imv_state[imvNum].m_valid_probe = imv_state[imvNum].m_valid_probe >> (VECTORSIZE - num);
+              imv_state[k].m_valid_probe = mask[VECTORSIZE];
+              imv_state[k].stage = 0;
+              imv_state[imvNum].stage = 0;
+              v_prefetch(imv_state[k].v_bucket_addrs);
+            }
+          }
+        }
+#endif
       }
         break;
       case 0: {
@@ -473,7 +513,10 @@ size_t filter_probe_imv(size_t begin, size_t end, Database& db, runtime::Hashmap
         imv_state[k].m_valid_probe = _mm512_kand(imv_state[k].m_valid_probe, _mm512_cmpneq_epi64_mask(imv_state[k].v_bucket_addrs, v_zero));
 
         num = _mm_popcnt_u32(imv_state[k].m_valid_probe);
-        if (num == VECTORSIZE) {
+        if (num == 0) {
+          imv_state[k].stage = 1;
+          --k;
+        } else if (num == VECTORSIZE) {
           v_prefetch(imv_state[k].v_bucket_addrs);
         } else {
           if ((done < imvNum) || (imv_state[imvNum1].m_valid_probe > 0)) {
@@ -525,7 +568,7 @@ size_t filter_probe_imv2(size_t begin, size_t end, Database& db, runtime::Hashma
       curProbe;
   IMVState* imv_state = new IMVState[vectorwise::Hashjoin::imvNum + 2];
 
-  __attribute__((aligned(64)))       __mmask8 m_match = 0, m_new_probes = -1, mask[VECTORSIZE + 1];
+  __attribute__((aligned(64)))         __mmask8 m_match = 0, m_new_probes = -1, mask[VECTORSIZE + 1];
 
   __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0);
   __m512i v_offset = _mm512_set1_epi64(0), v_new_build_key, v_build_keys;
@@ -561,7 +604,7 @@ size_t filter_probe_imv2(size_t begin, size_t end, Database& db, runtime::Hashma
     }
     switch (imv_state[k].stage) {
       case 1: {
-#if 01
+#if 0
         /// step 1: load the offsets of probing tuples
         imv_state[k].v_probe_offset = _mm512_add_epi64(_mm512_set1_epi64(nextProbe), v_base_offset);
         imv_state[k].m_valid_probe = _mm512_cmpgt_epu64_mask(v_base_offset_upper, imv_state[k].v_probe_offset);
@@ -570,9 +613,9 @@ size_t filter_probe_imv2(size_t begin, size_t end, Database& db, runtime::Hashma
         // v256_probe_keys = _mm256_maskz_loadu_epi32(imv_state[k].m_valid_probe, (char*)(probe_keys+nextProbe));
         imv_state[k].v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
         /// step 2.5: filter
-        imv_state[k].v_probe_hash = _mm512_maskz_loadu_epi64(imv_state[k].m_valid_probe, (l_quantity_col+nextProbe));
+        imv_state[k].v_probe_hash = _mm512_maskz_loadu_epi64(imv_state[k].m_valid_probe, (l_quantity_col + nextProbe));
         m_match = _mm512_cmpgt_epu64_mask(v_const, imv_state[k].v_probe_hash);
-        imv_state[k].m_valid_probe = _mm512_kand(imv_state[k].m_valid_probe ,m_match);
+        imv_state[k].m_valid_probe = _mm512_kand(imv_state[k].m_valid_probe, m_match);
         /// step 3: compute the hash values of probe keys
         imv_state[k].v_probe_hash = runtime::MurMurHash()((imv_state[k].v_probe_keys), (v_seed));
         nextProbe += VECTORSIZE;
@@ -633,7 +676,7 @@ size_t filter_probe_imv2(size_t begin, size_t end, Database& db, runtime::Hashma
             imv_state[k].stage = 4;
           }
         }
-          --k;
+        --k;
 #endif
       }
         break;
