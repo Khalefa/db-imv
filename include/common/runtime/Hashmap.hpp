@@ -69,7 +69,7 @@ class Hashmap {
   inline void prefetchEntry(__m512i& hash) {
     uint64_t* ptr = (uint64_t*)&hash;
     for (int i = 0; i < 8; ++i) {
-      _mm_prefetch(((char* )(entries + (ptr[i]&mask))), _MM_HINT_T0);
+      _mm_prefetch(((char* )(entries + (ptr[i] & mask))), _MM_HINT_T0);
     }
   }
   inline void PrefetchEntry(size_t hash) {

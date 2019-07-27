@@ -1,6 +1,9 @@
 #include "common/runtime/MemoryPool.hpp"
 #include "common/runtime/Memory.hpp"
 #include <new>
+#include <stdexcept>
+
+using std::runtime_error;
 
 namespace runtime {
 
@@ -22,7 +25,6 @@ GlobalPool::~GlobalPool() {
 GlobalPool::Chunk* GlobalPool::newChunk(size_t size) {
    return new (mem::malloc_huge(size + sizeof(Chunk))) Chunk(size);
 }
-
 void* GlobalPool::allocate(size_t size) {
    int8_t* start_;
    int8_t* end_;
@@ -45,6 +47,11 @@ restart:
                } while (!start.compare_exchange_weak(start_, end_));
                // Add a new chunk if space isn't sufficient
                allocSize = std::max(allocSize * 2, size);
+               if(size>AllocSizeUpper){
+                 throw std::runtime_error("allocate too large memory");
+               }else {
+                 allocSize = std::min(allocSize,AllocSizeUpper);
+               }
                auto chunk = newChunk(allocSize);
                chunk->next = current;
 

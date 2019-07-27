@@ -2,11 +2,11 @@
 #include "head.hpp"
 #define ORDERKEY 0
 #if ORDERKEY
-#define HT_SIZE 1500000
+#define HT_SIZE 15000000
 #else
-#define HT_SIZE 2000000
-#define PARTITION_SIZE 1024
+#define HT_SIZE 10000000
 #endif
+#define PARTITION_SIZE 4096
 struct AMACState {
   uint8_t stage;
   int probeKey = 0;

@@ -345,9 +345,9 @@ void test_agg(Database& db, size_t nrThreads) {
   vector<pair<string, decltype(aggFun)> > agg_name2fun;
   // agg_name2fun.push_back(make_pair("agg_simd", agg_simd));
   // sleep(10);
-  agg_name2fun.push_back(make_pair("agg_imv_merged", agg_imv_merged));
-  agg_name2fun.push_back(make_pair("agg_imv_hybrid", agg_imv_hybrid));
-//  agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
+//  agg_name2fun.push_back(make_pair("agg_imv_merged", agg_imv_merged));
+//  agg_name2fun.push_back(make_pair("agg_imv_hybrid", agg_imv_hybrid));
+  agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
   agg_name2fun.push_back(make_pair("agg_imv_serial", agg_imv_serial));
   agg_name2fun.push_back(make_pair("agg_gp", agg_gp));
   agg_name2fun.push_back(make_pair("agg_amac", agg_amac));
@@ -910,10 +910,10 @@ int main(int argc, char* argv[]) {
   tbb::task_scheduler_init scheduler(nrThreads);
 //  probe_test(tpch, nrThreads);
 //  probe_test_disorder(tpch, nrThreads);
-  pipeline(tpch, nrThreads);
+//  pipeline(tpch, nrThreads);
 //join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
-//   test_agg(tpch, nrThreads);
+   test_agg(tpch, nrThreads);
 
 // test_vectorwise_probe(tpch, nrThreads);
 // test_vectorwise_sel_probe(tpch, nrThreads);

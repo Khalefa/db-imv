@@ -6,11 +6,13 @@
 #include <cstdlib>
 #include <mutex>
 #include <new>
+#include "errno.h"
 
 
 #define DEBUG_ALLOC 0
 
 namespace runtime {
+static uint64_t AllocSizeUpper = (((uint64_t)1)<<31);
 
 class GlobalPool {
    struct Chunk {
@@ -60,6 +62,11 @@ inline void* Allocator::allocate(size_t size) {
    size += aligndiff;
    if (free < size) {
       allocSize = std::max(allocSize * 2, size + 64);
+      if(size>AllocSizeUpper){
+          throw std::runtime_error("allocate too large memory");
+        }else {
+          allocSize = std::min(allocSize,AllocSizeUpper);
+        }
       start = (uint8_t*)memorySource->allocate(allocSize);
 
       aligndiff = 64 - ((uintptr_t)start % 64);
