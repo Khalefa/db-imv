@@ -10,9 +10,9 @@ typedef struct StateSIMD StateSIMD;
 #define UNLIKELY(expr) __builtin_expect(!!(expr), 0)
 #define LIKELY(expr) __builtin_expect(!!(expr), 1)
 
-#define ScalarStateSize 10
+#define ScalarStateSize 20
 #define PDIS 192
-#define SIMDStateSize 4
+#define SIMDStateSize 5
 #define WRITE_RESULTS 1
 #define LOAD_FACTOR 1
 #define MULTI_TUPLE (BUCKET_SIZE - 1)
@@ -22,9 +22,9 @@ typedef struct StateSIMD StateSIMD;
 #define DIR_PREFETCH 1
 #define SEQPREFETCH PDIS
 #define DIVIDE 0
-
+#define USE_TBB 1
 #define AFFINITY 01
-static int MORSE_SIZE =0;
+#define MORSE_SIZE 10000
 
 #if KNL
 #define _mm512_mullo_epi64(a, b) _mm512_mullo_epi32(a, b)

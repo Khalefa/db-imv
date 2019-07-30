@@ -1,3 +1,4 @@
+#include <string.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -142,8 +143,35 @@ int64_t search_tree_AMAC(tree_t *tree, relation_t *rel, void *output) {
   }
   return matches;
 }
-volatile char g_lock;
-volatile uint64_t total_num = 0;
+volatile static char g_lock = 0, g_lock_morse = 0;
+volatile static uint64_t total_num = 0, global_curse = 0, global_upper;
+typedef int64_t (*BTSFun)(tree_t *tree, relation_t *rel, void *output);
+volatile static struct Fun {
+  BTSFun fun_ptr;
+  char fun_name[8];
+} pfun[10];
+volatile static int pf_num = 0;
+void morse_driven(void*param, BTSFun fun, void*output) {
+  tree_arg_t *args = (tree_arg_t *) param;
+  uint64_t base = 0, num = 0;
+  args->num_results = 0;
+  relation_t relS;
+  relS.tuples = args->relS.tuples;
+  relS.num_tuples = 0;
+  while (1) {
+    lock(&g_lock_morse);
+    base = global_curse;
+    global_curse += MORSE_SIZE;
+    unlock(&g_lock_morse);
+    if (base >= global_upper) {
+      break;
+    }
+    num = (global_upper - base) < MORSE_SIZE ? (global_upper - base) : MORSE_SIZE;
+    relS.tuples = args->relS.tuples + base;
+    relS.num_tuples = num;
+    args->num_results += fun(args->tree, &relS, output);
+  }
+}
 void *bts_thread(void *param) {
   int rv;
   total_num = 0;
@@ -183,6 +211,7 @@ void *bts_thread(void *param) {
     printf("size of tnode_t = %d, total num = %lld\n", sizeof(tnode_t),
            args->tree->num);
   }
+
   BARRIER_ARRIVE(args->barrier, rv);
 #ifdef PERF_COUNTERS
   if (args->tid == 0) {
@@ -244,287 +273,65 @@ void *bts_thread(void *param) {
   }
     //
 */
-  chainedtuplebuffer_t *chainedbuf_compact1 = chainedtuplebuffer_init();
-  for (int rp = 0; rp < REPEAT_PROBE; ++rp) {
-    BARRIER_ARRIVE(args->barrier, rv);
-    gettimeofday(&t1, NULL);
-    args->num_results = bts_smv(args->tree, &args->relS, chainedbuf_compact1);
-    lock(&g_lock);
-#if DIVIDE
-    total_num += args->num_results;
+  if (args->tid == 0) {
+    strcpy(pfun[0].fun_name, "IMV");
+    strcpy(pfun[1].fun_name, "AMAC");
+    strcpy(pfun[2].fun_name, "FVA");
+    strcpy(pfun[3].fun_name, "DVA");
+    strcpy(pfun[4].fun_name, "SIMD");
+    strcpy(pfun[5].fun_name, "Naive");
+
+    pfun[0].fun_ptr = bts_smv;
+    pfun[1].fun_ptr = search_tree_AMAC;
+    pfun[2].fun_ptr = bts_simd_amac;
+    pfun[3].fun_ptr = bts_simd_amac_raw;
+    pfun[4].fun_ptr = bts_simd;
+    pfun[5].fun_ptr = search_tree_raw;
+
+    pf_num = 6;
+  }
+  BARRIER_ARRIVE(args->barrier, rv);
+
+  for (int fid = 0; fid < pf_num; ++fid) {
+    chainedtuplebuffer_t *chainedbuf_compact = chainedtuplebuffer_init();
+    for (int rp = 0; rp < REPEAT_PROBE; ++rp) {
+      BARRIER_ARRIVE(args->barrier, rv);
+      gettimeofday(&t1, NULL);
+#if MORSE_SIZE
+      morse_driven(param, pfun[fid].fun_ptr, chainedbuf_compact);
 #else
-    total_num = args->num_results;
+      args->num_results = pfun[fid].fun_ptr(args->tree, &args->relS, chainedbuf_compact);
 #endif
-    unlock(&g_lock);
-    BARRIER_ARRIVE(args->barrier, rv);
-    if (args->tid == 0) {
-      printf("total result num = %lld\t", total_num);
-      gettimeofday(&t2, NULL);
-      deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-      printf("------ SMV bts costs time (ms) = %lf\n", deltaT * 1.0 / 1000);
-      total_num = 0;
+      lock(&g_lock);
+#if DIVIDE
+      total_num += args->num_results;
+#elif MORSE_SIZE
+      total_num += args->num_results;
+#else
+      total_num = args->num_results;
+#endif
+      unlock(&g_lock);
+      BARRIER_ARRIVE(args->barrier, rv);
+      if (args->tid == 0) {
+        gettimeofday(&t2, NULL);
+        printf("total result num = %lld\t", total_num);
+        deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
+        printf("---- %5s bts costs time (ms) = %10.4lf , tid = %3d\n", pfun[fid].fun_name, deltaT * 1.0 / 1000, args->tid);
+        total_num = 0;
+        global_curse = 0;
+
+      }
     }
-  }
-  chainedtuplebuffer_free(chainedbuf_compact1);
-  if (args->tid == 0) {
-    puts("+++++sleep begin+++++");
-  }
-  sleep(SLEEP_TIME);
-  if (args->tid == 0) {
-    puts("+++++sleep end  +++++");
+    chainedtuplebuffer_free(chainedbuf_compact);
+    if (args->tid == 0) {
+      puts("+++++sleep begin+++++");
+    }
+    sleep(SLEEP_TIME);
+    if (args->tid == 0) {
+      puts("+++++sleep end  +++++");
+    }
   }
 
-  ////////////////raw GP probe
-  /*  chainedtuplebuffer_t *chainedbuf_rp = chainedtuplebuffer_init();
-  for (int rp = 0; rp < REPEAT_PROBE; ++rp) {
-    BARRIER_ARRIVE(args->barrier, rv);
-    gettimeofday(&t1, NULL);
-    args->num_results =
-        probe_hashtable_raw_prefetch(args->ht, &args->relS, chainedbuf_rp);
-    lock(&g_lock);
-#if DIVIDE
-    total_num += args->num_results;
-#else
-    total_num = args->num_results;
-#endif
-    unlock(&g_lock);
-    BARRIER_ARRIVE(args->barrier, rv);
-    if (args->tid == 0) {
-      printf("total result num = %lld\t", total_num);
-      gettimeofday(&t2, NULL);
-      deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-      printf("------RAW GP probe costs time (ms) = %lf\n", deltaT * 1.0 /
-  1000);
-      total_num = 0;
-    }
-  }
-  chainedtuplebuffer_free(chainedbuf_rp);
-  if (args->tid == 0) {
-    puts("+++++sleep begin+++++");
-  }
-  sleep(SLEEP_TIME);
-  if (args->tid == 0) {
-    puts("+++++sleep end  +++++");
-  }
-  */
-  ////////////////GP probe
-  /*chainedtuplebuffer_t *chainedbuf_gp = chainedtuplebuffer_init();
-  for (int rp = 0; rp < REPEAT_PROBE; ++rp) {
-    BARRIER_ARRIVE(args->barrier, rv);
-    gettimeofday(&t1, NULL);
-    args->num_results = probe_gp(args->ht, &args->relS, chainedbuf_gp);
-    lock(&g_lock);
-    #if DIVIDE
-    total_num += args->num_results;
-#else
-    total_num = args->num_results;
-#endif
-    unlock(&g_lock);
-    BARRIER_ARRIVE(args->barrier, rv);
-    if (args->tid == 0) {
-      printf("total result num = %lld\t", total_num);
-      gettimeofday(&t2, NULL);
-      deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-      printf("-------- GP  probe costs time (ms) = %lf\n", deltaT * 1.0 /
-  1000);
-      total_num = 0;
-    }
-  }
-  chainedtuplebuffer_free(chainedbuf_gp);
-  if (args->tid == 0) {
-    puts("+++++sleep begin+++++");
-  }
-  sleep(SLEEP_TIME);
-  if (args->tid == 0) {
-    puts("+++++sleep end  +++++");
-  }
-*/
-  ////////////////AMAC probe
-  chainedtuplebuffer_t *chainedbuf_amac = chainedtuplebuffer_init();
-  for (int rp = 0; rp < REPEAT_PROBE; ++rp) {
-    BARRIER_ARRIVE(args->barrier, rv);
-    gettimeofday(&t1, NULL);
-    args->num_results =
-        search_tree_AMAC(args->tree, &args->relS, chainedbuf_amac);
-    lock(&g_lock);
-#if DIVIDE
-    total_num += args->num_results;
-#else
-    total_num = args->num_results;
-#endif
-    unlock(&g_lock);
-    BARRIER_ARRIVE(args->barrier, rv);
-    if (args->tid == 0) {
-      printf("total result num = %lld\t", total_num);
-      gettimeofday(&t2, NULL);
-      deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-      printf("--------AMAC tree costs time (ms) = %lf\n", deltaT * 1.0 / 1000);
-      total_num = 0;
-    }
-  }
-  chainedtuplebuffer_free(chainedbuf_amac);
-  //////////////////
-  if (args->tid == 0) {
-    puts("+++++sleep begin+++++");
-  }
-  sleep(SLEEP_TIME);
-  if (args->tid == 0) {
-    puts("+++++sleep end  +++++");
-  }
-
-  ////////////////SIMD GP probe
-  /*
-  chainedtuplebuffer_t *chainedbuf_simd_gp = chainedtuplebuffer_init();
-  for (int rp = 0; rp < REPEAT_PROBE; ++rp) {
-    BARRIER_ARRIVE(args->barrier, rv);
-    gettimeofday(&t1, NULL);
-    args->num_results =
-        probe_simd_gp(args->ht, &args->relS, chainedbuf_simd_gp);
-    lock(&g_lock);
-    #if DIVIDE
-    total_num += args->num_results;
-#else
-    total_num = args->num_results;
-#endif
-    unlock(&g_lock);
-    BARRIER_ARRIVE(args->barrier, rv);
-    if (args->tid == 0) {
-      printf("total result num = %lld\t", total_num);
-      gettimeofday(&t2, NULL);
-      deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-      printf("-----SIMD GP probe costs time (ms) = %lf\n", deltaT * 1.0 / 1000);
-      total_num = 0;
-    }
-  }
-  chainedtuplebuffer_free(chainedbuf_simd_gp);
-  //////////////////
-  if (args->tid == 0) {
-    puts("+++++sleep begin+++++");
-  }
-  sleep(SLEEP_TIME);
-  if (args->tid == 0) {
-    puts("+++++sleep end  +++++");
-  }
-
-  */  ////////////////SIMD AMAC probe
-  chainedtuplebuffer_t *chainedbuf_simd_amac = chainedtuplebuffer_init();
-  for (int rp = 0; rp < REPEAT_PROBE; ++rp) {
-    BARRIER_ARRIVE(args->barrier, rv);
-    gettimeofday(&t1, NULL);
-    args->num_results =
-        bts_simd_amac(args->tree, &args->relS, chainedbuf_simd_amac);
-    lock(&g_lock);
-#if DIVIDE
-    total_num += args->num_results;
-#else
-    total_num = args->num_results;
-#endif
-    unlock(&g_lock);
-    BARRIER_ARRIVE(args->barrier, rv);
-    if (args->tid == 0) {
-      printf("total result num = %lld\t", total_num);
-      gettimeofday(&t2, NULL);
-      deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-      printf("---SIMD AMAC bts costs time (ms) = %lf\n", deltaT * 1.0 / 1000);
-      total_num = 0;
-    }
-  }
-  chainedtuplebuffer_free(chainedbuf_simd_amac);
-  //////////////////
-  if (args->tid == 0) {
-    puts("+++++sleep begin+++++");
-  }
-  sleep(SLEEP_TIME);
-  if (args->tid == 0) {
-    puts("+++++sleep end  +++++");
-  }
-
-  ////////////////SIMD AMAC probe raw
-  chainedtuplebuffer_t *chainedbuf_simd_amac_raw = chainedtuplebuffer_init();
-  for (int rp = 0; rp < REPEAT_PROBE; ++rp) {
-    BARRIER_ARRIVE(args->barrier, rv);
-    gettimeofday(&t1, NULL);
-    args->num_results =
-        bts_simd_amac_raw(args->tree, &args->relS, chainedbuf_simd_amac_raw);
-    lock(&g_lock);
-#if DIVIDE
-    total_num += args->num_results;
-#else
-    total_num = args->num_results;
-#endif
-    unlock(&g_lock);
-    BARRIER_ARRIVE(args->barrier, rv);
-    if (args->tid == 0) {
-      printf("total result num = %lld\t", total_num);
-      gettimeofday(&t2, NULL);
-      deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-      printf("---  SIMD AMAC RAW costs time (ms) = %lf\n", deltaT * 1.0 / 1000);
-      total_num = 0;
-    }
-  }
-  chainedtuplebuffer_free(chainedbuf_simd_amac_raw);
-  if (args->tid == 0) {
-    puts("+++++sleep begin+++++");
-  }
-  sleep(SLEEP_TIME);
-  if (args->tid == 0) {
-    puts("+++++sleep end  +++++");
-  }
-  ////////////////SIMD probe full vectorization
-  chainedtuplebuffer_t *chainedbuf_simd = chainedtuplebuffer_init();
-  for (int rp = 0; rp < REPEAT_PROBE; ++rp) {
-    BARRIER_ARRIVE(args->barrier, rv);
-    gettimeofday(&t1, NULL);
-    args->num_results = bts_simd(args->tree, &args->relS, chainedbuf_simd);
-    lock(&g_lock);
-#if DIVIDE
-    total_num += args->num_results;
-#else
-    total_num = args->num_results;
-#endif
-    unlock(&g_lock);
-    BARRIER_ARRIVE(args->barrier, rv);
-    if (args->tid == 0) {
-      printf("total result num = %lld\t", total_num);
-      gettimeofday(&t2, NULL);
-      deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-      printf("--------SIMD bts costs time (ms) = %lf\n", deltaT * 1.0 / 1000);
-      total_num = 0;
-    }
-  }
-  chainedtuplebuffer_free(chainedbuf_simd);
-  //////////////////
-  if (args->tid == 0) {
-    puts("+++++sleep begin+++++");
-  }
-  sleep(SLEEP_TIME);
-  if (args->tid == 0) {
-    puts("+++++sleep end  +++++");
-  }
-
-  //////// raw probe in scalar
-  chainedtuplebuffer_t *chainedbuf = chainedtuplebuffer_init();
-  for (int rp = 0; rp < REPEAT_PROBE; ++rp) {
-    BARRIER_ARRIVE(args->barrier, rv);
-    gettimeofday(&t1, NULL);
-    args->num_results = search_tree_raw(args->tree, &args->relS, chainedbuf);
-    lock(&g_lock);
-#if DIVIDE
-    total_num += args->num_results;
-#else
-    total_num = args->num_results;
-#endif
-    unlock(&g_lock);
-    BARRIER_ARRIVE(args->barrier, rv);
-    if (args->tid == 0) {
-      printf("total result num = %lld\t", total_num);
-      gettimeofday(&t2, NULL);
-      deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-      printf("-------- RAW bts costs time (ms) = %lf\n", deltaT * 1.0 / 1000);
-      total_num = 0;
-    }
-  }
-  chainedtuplebuffer_free(chainedbuf);
 
 //------------------------------------
 #ifdef JOIN_RESULT_MATERIALIZE
@@ -533,32 +340,8 @@ void *bts_thread(void *param) {
 // args->threadresult->results = (void *)chainedbuf;
 #endif
 
-#ifndef NO_TIMING
-
-  /* for a reliable timing we have to wait until all finishes */
-  BARRIER_ARRIVE(args->barrier, rv);
-
-  /* probe phase finished, thread-0 checkpoints the time */
-  if (args->tid == 0) {
-    stopTimer(&args->timer1);
-    gettimeofday(&args->end, NULL);
-  }
-#endif
-
-#ifdef PERF_COUNTERS
-  if (args->tid == 0) {
-    PCM_stop();
-    PCM_log("========== Probe phase profiling results ==========\n");
-    PCM_printResults();
-    PCM_log("===================================================\n");
-    PCM_cleanup();
-  }
-  /* Just to make sure we get consistent performance numbers */
-  BARRIER_ARRIVE(args->barrier, rv);
-#endif
   return 0;
 }
-typedef int64_t (*BTSFun)(tree_t *tree, relation_t *rel, void *output);
 
 static void tbb_run(relation_t *relR, relation_t *relS, int nthreads) {
   int nrThreads = nthreads;
@@ -600,7 +383,7 @@ static void tbb_run(relation_t *relR, relation_t *relS, int nthreads) {
   agg_name2fun.push_back(make_pair("DVA", bts_simd_amac_raw));
   agg_name2fun.push_back(make_pair("SIMD", bts_simd));
   agg_name2fun.push_back(make_pair("IMV", bts_smv));
-//  agg_name2fun.push_back(make_pair("Naive", probe_hashtable));
+  agg_name2fun.push_back(make_pair("Naive", search_tree_raw));
 
   for (auto name2fun : agg_name2fun) {
     event.timeAndProfile(name2fun.first, 10000,[&](){ probe(name2fun.second);}, repetitions);
@@ -634,7 +417,7 @@ result_t *BTS(relation_t *relR, relation_t *relS, int nthreads) {
       (threadresult_t *)alloc_aligned(sizeof(threadresult_t) * nthreads);
 #endif
 
-#if !USE_TBB
+#if USE_TBB
   pthread_attr_init(&attr);
   for (i = 0; i < nthreads; i++) {
     int cpu_idx = get_cpu_id(i);
@@ -652,6 +435,8 @@ result_t *BTS(relation_t *relR, relation_t *relS, int nthreads) {
   joinresult->nthreads = nthreads;
   return joinresult;
 #endif
+  global_curse = 0;
+  global_upper = relS->num_tuples;
 
   uint32_t nbuckets = (relR->num_tuples / BUCKET_SIZE);
   tree_t *tree = (tree_t *)malloc(sizeof(tree_t));

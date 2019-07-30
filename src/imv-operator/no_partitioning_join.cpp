@@ -932,7 +932,7 @@ result_t *NPO(relation_t *relR, relation_t *relS, int nthreads) {
   joinresult->resultlist = (threadresult_t *) alloc_aligned(sizeof(threadresult_t) * nthreads);
 #endif
 
-#if !USE_TBB
+#if USE_TBB
   pthread_attr_init(&attr);
   for (i = 0; i < nthreads; i++) {
     int cpu_idx = get_cpu_id(i);
@@ -965,9 +965,7 @@ result_t *NPO(relation_t *relR, relation_t *relS, int nthreads) {
   }
   global_curse = 0;
   global_upper = relS->num_tuples;
-  if (nthreads == 1) {
-    MORSE_SIZE = global_upper;
-  }
+
   pthread_attr_init(&attr);
   for (i = 0; i < nthreads; i++) {
     int cpu_idx = get_cpu_id(i);
