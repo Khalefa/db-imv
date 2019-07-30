@@ -1,5 +1,5 @@
 #ifndef JEVENTS_H
-#define JEVENTS_H 1
+#define JEVENTS_H
 
 #include <sys/types.h>
 

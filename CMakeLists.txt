@@ -33,8 +33,8 @@ if(KNL)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -mtune=native -std=c++14 -g -fPIC -w -Wextra -Wno-psabi  -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512pf -mavx512er -mavx512cd -mavx2 -mbmi2 -mavx -fpermissive")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -w -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512pf -mavx512er -mavx512cd -mavx2 -mbmi2 -mavx -fpermissive")
 else()
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=skylake-avx512 -g -mtune=native -std=c++14 -fPIC -w -Wextra -Wno-psabi  -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -w -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=skylake-avx512 -g -mtune=native -std=c++14 -fPIC -w -Wextra -Wno-psabi  -fno-omit-frame-pointer -Wno-unknown-pragmas -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx -fpermissive -lpthread")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -w -Wextra -fno-omit-frame-pointer -march=native -fdiagnostics-color -mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx2 -mbmi2 -mavx -fpermissive -lpthread")
 endif(KNL)
 
 if(LINUX)
@@ -201,6 +201,20 @@ target_include_directories(rof PUBLIC
     PRIVATE src)
 target_link_libraries(rof common)
 
+add_library(imv_operator
+    src/imv-operator/cpu_mapping.cpp
+    src/imv-operator/generator.cpp
+    src/imv-operator/genzipf.cpp
+    src/imv-operator/npj.cpp
+    src/imv-operator/no_partitioning_join.cpp
+    src/imv-operator/tree_binary.cpp
+    src/imv-operator/tree_binary_smv.cpp
+  )
+target_include_directories(imv_operator PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    PRIVATE src)
+target_link_libraries(imv_operator common  ${JEVENTSLIB})
 
 file(GLOB PRIMITIVES src/vectorwise/primitives/*.cpp)
 add_library(vectorwise
@@ -373,3 +387,10 @@ endif()
 
   target_link_libraries(join_test imv tpch hyper vectorwise  ${JEVENTSLIB})
 
+ add_executable(operator src/imv-operator/main.cpp)
+  target_include_directories(operator PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    PRIVATE src)
+
+  target_link_libraries(operator imv_operator imv tpch hyper vectorwise)

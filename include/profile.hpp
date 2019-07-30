@@ -1,3 +1,5 @@
+#ifndef PROFILE
+#define PROFILE
 #include "common/Compat.hpp"
 #include <cstdlib>
 #include <cstring>
@@ -254,7 +256,7 @@ inline double gettime() {
    return ((double)now_tv.tv_sec) + ((double)now_tv.tv_usec) / 1000000.0;
 }
 
-size_t getCurrentRSS() {
+inline size_t getCurrentRSS() {
    long rss = 0L;
    FILE* fp = NULL;
    if ((fp = fopen("/proc/self/statm", "r")) == NULL)
@@ -267,7 +269,7 @@ size_t getCurrentRSS() {
    return (size_t)rss * (size_t)sysconf(_SC_PAGESIZE);
 }
 
-void PerfEvents::timeAndProfile(std::string s, uint64_t count,
+inline void PerfEvents::timeAndProfile(std::string s, uint64_t count,
                                 std::function<void()> fn, uint64_t repetitions,
                                 bool mem) {
    using namespace std;
@@ -329,3 +331,4 @@ void PerfEvents::timeAndProfile(std::string s, uint64_t count,
    std::cout << std::endl;
    writeHeader = false;
 }
+#endif
