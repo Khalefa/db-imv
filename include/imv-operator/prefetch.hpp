@@ -2,9 +2,11 @@
 #define SRC_PREFETCH_H_
 #include <assert.h>
 #include <immintrin.h>
-
+#include<algorithm>
 #include "npj_types.hpp"
 #include "types.hpp"
+
+using std::sort;
 typedef struct amac_state_t scalar_state_t;
 typedef struct StateSIMD StateSIMD;
 #define UNLIKELY(expr) __builtin_expect(!!(expr), 0)
@@ -22,10 +24,11 @@ typedef struct StateSIMD StateSIMD;
 #define DIR_PREFETCH 1
 #define SEQPREFETCH PDIS
 #define DIVIDE 0
-#define USE_TBB 1
-#define AFFINITY 01
-#define MORSE_SIZE 10000
-
+#define USE_TBB 0
+#define AFFINITY 1
+#define MORSE_SIZE 100000
+#define SORTED 0
+#define TEST_NUMA 1
 #if KNL
 #define _mm512_mullo_epi64(a, b) _mm512_mullo_epi32(a, b)
 #endif
@@ -45,5 +48,11 @@ struct StateSIMD {
   __mmask8 m_have_tuple;
   char stage;
 };
+static bool cmp_tuples(tuple_t& a,tuple_t& b){
+  return a.key<b.key;
+}
+inline void sort_rel(relation_t * rel){
+  sort(rel->tuples,rel->tuples+rel->num_tuples,cmp_tuples);
+}
 
 #endif /* SRC_PREFETCH_H_ */

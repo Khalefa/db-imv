@@ -10,7 +10,7 @@
  * (c) 2012, ETH Zurich, Systems Group
  *
  * @mainpage Main-Memory Hash Joins On Multi-Core CPUs: Tuning to the Underlying
-Hardware
+ Hardware
  *
  * @section intro Introduction
  *
@@ -34,32 +34,32 @@ Hardware
  * for configuration. Thus, compilation should be as simple as:
  *
  * @verbatim
-       $ ./configure
-       $ make
-@endverbatim
+ $ ./configure
+ $ make
+ @endverbatim
  *
  * Besides the usual ./configure options, compilation can be customized with the
  * following options:
  * @verbatim
-   --enable-debug         enable debug messages on commandline  [default=no]
-   --enable-key8B         use 8B keys and values making tuples 16B  [default=no]
-   --enable-perfcounters  enable performance monitoring with Intel PCM  [no]
-   --enable-paddedbucket  enable padding of buckets to cache line size in NPO
-[no]
-   --enable-timing        enable execution timing  [default=yes]
-   --enable-syncstats     enable synchronization timing stats  [default=no]
-   --enable-skewhandling  enable fine-granular task decomposition based skew
-handling in radix [default=no]
-@endverbatim
+ --enable-debug         enable debug messages on commandline  [default=no]
+ --enable-key8B         use 8B keys and values making tuples 16B  [default=no]
+ --enable-perfcounters  enable performance monitoring with Intel PCM  [no]
+ --enable-paddedbucket  enable padding of buckets to cache line size in NPO
+ [no]
+ --enable-timing        enable execution timing  [default=yes]
+ --enable-syncstats     enable synchronization timing stats  [default=no]
+ --enable-skewhandling  enable fine-granular task decomposition based skew
+ handling in radix [default=no]
+ @endverbatim
  * Additionally, the code can be configured to enable further optimizations
  * discussed in the Technical Report version of the paper:
  * @verbatim
-   --enable-prefetch-npj   enable prefetching in no partitioning join
-[default=no]
-   --enable-swwc-part      enable software write-combining optimization in
-                           partitioning (Experimental, not tested extensively) ?
-[default=no]
-@endverbatim
+ --enable-prefetch-npj   enable prefetching in no partitioning join
+ [default=no]
+ --enable-swwc-part      enable software write-combining optimization in
+ partitioning (Experimental, not tested extensively) ?
+ [default=no]
+ @endverbatim
  * Our code makes use of the Intel Performance Counter Monitor tool which was
  * slightly modified to be integrated in to our implementation. The original
  * code can be downloaded from:
@@ -88,31 +88,31 @@ handling in radix [default=no]
  * The <tt>mchashjoins</tt> binary understands the following command line
  * options:
  * @verbatim
-      Join algorithm selection, algorithms : RJ, PRO, PRH, PRHO, NPO, NPO_st
-         -a --algo=<name>    Run the hash join algorithm named <name> [PRO]
+ Join algorithm selection, algorithms : RJ, PRO, PRH, PRHO, NPO, NPO_st
+ -a --algo=<name>    Run the hash join algorithm named <name> [PRO]
 
-      Other join configuration options, with default values in [] :
-         -n --nthreads=<N>  Number of threads to use <N> [2]
-         -r --r-size=<R>    Number of tuples in build relation R <R> [128000000]
-         -s --s-size=<S>    Number of tuples in probe relation S <S> [128000000]
-         -x --r-seed=<x>    Seed value for generating relation R <x> [12345]
-         -y --s-seed=<y>    Seed value for generating relation S <y> [54321]
-         -t --r-skew=<t>      Zipf skew parameter for probe relation R <t> [0.0]
-         -z --s-skew=<z>      Zipf skew parameter for probe relation S <z> [0.0]
-         --non-unique       Use non-unique (duplicated) keys in input relations
-         --full-range       Spread keys in relns. in full 32-bit integer range
-         --basic-numa       Numa-localize relations to threads (Experimental)
+ Other join configuration options, with default values in [] :
+ -n --nthreads=<N>  Number of threads to use <N> [2]
+ -r --r-size=<R>    Number of tuples in build relation R <R> [128000000]
+ -s --s-size=<S>    Number of tuples in probe relation S <S> [128000000]
+ -x --r-seed=<x>    Seed value for generating relation R <x> [12345]
+ -y --s-seed=<y>    Seed value for generating relation S <y> [54321]
+ -t --r-skew=<t>      Zipf skew parameter for probe relation R <t> [0.0]
+ -z --s-skew=<z>      Zipf skew parameter for probe relation S <z> [0.0]
+ --non-unique       Use non-unique (duplicated) keys in input relations
+ --full-range       Spread keys in relns. in full 32-bit integer range
+ --basic-numa       Numa-localize relations to threads (Experimental)
 
-      Performance profiling options, when compiled with --enable-perfcounters.
-         -p --perfconf=<P>  Intel PCM config file with upto 4 counters [none]
-         -o --perfout=<O>   Output file to print performance counters [stdout]
+ Performance profiling options, when compiled with --enable-perfcounters.
+ -p --perfconf=<P>  Intel PCM config file with upto 4 counters [none]
+ -o --perfout=<O>   Output file to print performance counters [stdout]
 
-      Basic user options
-          -h --help         Show this message
-          --verbose         Be more verbose -- show misc extra info
-          --version         Show version
+ Basic user options
+ -h --help         Show this message
+ --verbose         Be more verbose -- show misc extra info
+ --version         Show version
 
-@endverbatim
+ @endverbatim
  * The above command line options can be used to instantiate a certain
  * configuration to run various joins and print out the resulting
  * statistics. Following the same methodology of the related work, our joins
@@ -133,9 +133,9 @@ handling in radix [default=no]
  * mapping threads 1 to 8 to correct CPUs:
  *
  * @verbatim
-cpu-mapping.txt
-8 0 1 2 3 8 9 10 11
-@endverbatim
+ cpu-mapping.txt
+ 8 0 1 2 3 8 9 10 11
+ @endverbatim
  *
  * This file is must be created in the executable directory and used by default
  * if exists in the directory. It basically says that we will use 8 CPUs listed
@@ -190,8 +190,8 @@ cpu-mapping.txt
  * <tt>mchashjoins</tt>:
  *
  * @verbatim
-      $ ./mchashjoins [other options] --r-size=128000000 --s-size=128000000
-@endverbatim
+ $ ./mchashjoins [other options] --r-size=128000000 --s-size=128000000
+ @endverbatim
  *
  * \note Configure must have run without --enable-key8B.
  *
@@ -205,10 +205,10 @@ cpu-mapping.txt
  * up to 16 bytes per tuple. To generate this data set do the following:
  *
  * @verbatim
-     $ ./configure --enable-key8B
-     $ make
-     $ ./mchashjoins [other options] --r-size=16777216 --s-size=268435456
-@endverbatim
+ $ ./configure --enable-key8B
+ $ make
+ $ ./mchashjoins [other options] --r-size=16777216 --s-size=268435456
+ @endverbatim
  *
  * @subsection skew Introducing Skew in Data Sets
  *
@@ -217,8 +217,8 @@ cpu-mapping.txt
  * distribution skewness parameter:
  *
  * @verbatim
-     $ ./mchashjoins [other options] --skew=1.05
-@endverbatim
+ $ ./mchashjoins [other options] --skew=1.05
+ @endverbatim
  *
  * @section wisconsin Wisconsin Implementation
  *
@@ -255,6 +255,7 @@ cpu-mapping.txt
 
 #include "imv-operator/affinity.h"      /* pthread_attr_setaffinity_np & sched_setaffinity */
 #include "imv-operator/config.h"     /* autoconf header */
+#include "imv-operator/prefetch.hpp"     /* autoconf header */
 
 #ifdef JOIN_RESULT_MATERIALIZE
 #include "imv-operator/tuple_buffer.hpp" /* for materialization */
@@ -284,7 +285,7 @@ struct param_t {
   int nonunique_keys; /* non-unique keys allowed? */
   int verbose;
   int fullrange_keys; /* keys covers full int range? */
-  int basic_numa;     /* alloc input chunks thread local? */
+  int basic_numa; /* alloc input chunks thread local? */
   char *perfconf;
   char *perfout;
   /** if the relations are load from file */
@@ -297,16 +298,14 @@ extern int optind, opterr, optopt;
 
 /** An experimental feature to allocate input relations numa-local */
 extern int numalocalize; /* defined in generator.c */
-extern int nthreads;     /* defined in generator.c */
+extern int nthreads; /* defined in generator.c */
 
 /** all available algorithms */
-static struct algo_t algos[] = {
-                                {"NPO", NPO},
+static struct algo_t algos[] = { { "NPO", NPO },
 //                                {"PIPELINE", PIPELINE},
-                                {"BTS", BTS},
+    { "BTS", BTS },
 //                                {"NPO_st", NPO_st}, /* NPO single threaded */
-                                {"GEN", NPO},
-                                {{0}, 0}};
+    { "GEN", NPO }, { { 0 }, 0 } };
 
 /* command line handling functions */
 void print_help();
@@ -358,12 +357,9 @@ int main(int argc, char **argv) {
 #endif
 
   /* create relation R */
-  fprintf(stdout,
-          "[INFO ] %s relation R with size = %.3lf MiB, #tuples = %llu, skew = "
+  fprintf(stdout, "[INFO ] %s relation R with size = %.3lf MiB, #tuples = %llu, skew = "
           "%.2lf : ",
-          (cmd_params.loadfileS != NULL) ? ("Loading") : ("Creating"),
-          (double)sizeof(tuple_t) * cmd_params.r_size / 1024.0 / 1024.0,
-          cmd_params.r_size, cmd_params.r_skew);
+          (cmd_params.loadfileS != NULL) ? ("Loading") : ("Creating"), (double) sizeof(tuple_t) * cmd_params.r_size / 1024.0 / 1024.0, cmd_params.r_size, cmd_params.r_skew);
   fflush(stdout);
 
   seed_generator(cmd_params.r_seed);
@@ -382,23 +378,18 @@ int main(int argc, char **argv) {
   } else {
     if (cmd_params.r_skew > 0) {
       /* S is skewed */
-      create_relation_zipf(&relR, cmd_params.r_size, cmd_params.r_size,
-                           cmd_params.r_skew);
+      create_relation_zipf(&relR, cmd_params.r_size, cmd_params.r_size, cmd_params.r_skew);
     } else {
       // create_relation_pk(&relR, cmd_params.r_size);
-      parallel_create_relation(&relR, cmd_params.r_size, nthreads,
-                               cmd_params.r_size);
+      parallel_create_relation(&relR, cmd_params.r_size, nthreads, cmd_params.r_size);
     }
   }
   printf("OK \n");
 
   /* create relation S */
-  fprintf(stdout,
-          "[INFO ] %s relation S with size = %.3lf MiB, #tuples = %lld, skew = "
+  fprintf(stdout, "[INFO ] %s relation S with size = %.3lf MiB, #tuples = %lld, skew = "
           "%.2lf : ",
-          (cmd_params.loadfileS != NULL) ? ("Loading") : ("Creating"),
-          (double)sizeof(tuple_t) * cmd_params.s_size / 1024.0 / 1024.0,
-          cmd_params.s_size, cmd_params.s_skew);
+          (cmd_params.loadfileS != NULL) ? ("Loading") : ("Creating"), (double) sizeof(tuple_t) * cmd_params.s_size / 1024.0 / 1024.0, cmd_params.s_size, cmd_params.s_skew);
   fflush(stdout);
 
   seed_generator(cmd_params.s_seed);
@@ -416,22 +407,18 @@ int main(int argc, char **argv) {
 
     if (cmd_params.s_skew > 0) {
       /* S is skewed */
-      create_relation_zipf(&relS, cmd_params.s_size, cmd_params.r_size,
-                           cmd_params.s_skew);
+      create_relation_zipf(&relS, cmd_params.s_size, cmd_params.r_size, cmd_params.s_skew);
     } else {
       /* S is uniform foreign key */
       // create_relation_fk(&relS, cmd_params.s_size, cmd_params.r_size);
-      parallel_create_relation(&relS, cmd_params.s_size, nthreads,
-                               cmd_params.r_size);
+      parallel_create_relation(&relS, cmd_params.s_size, nthreads, cmd_params.r_size);
     }
   }
   printf("OK \n");
 #define STRSIZE 64
   if (strcmp(cmd_params.algo->name, "GEN") == 0) {
-    char str_skew_r[STRSIZE] = "", str_size_r[STRSIZE] = "",
-         str_skew_s[STRSIZE] = "", str_size_s[STRSIZE] = "";
-    char r_skew[STRSIZE] = "r_skew=", str_size[STRSIZE] = "_size=",
-         s_skew[STRSIZE] = "s_skew=";
+    char str_skew_r[STRSIZE] = "", str_size_r[STRSIZE] = "", str_skew_s[STRSIZE] = "", str_size_s[STRSIZE] = "";
+    char r_skew[STRSIZE] = "r_skew=", str_size[STRSIZE] = "_size=", s_skew[STRSIZE] = "s_skew=";
     gcvt(cmd_params.r_skew, 18, str_skew_r);
     double rr = cmd_params.r_size;
     if (rr >= 1024) {
@@ -448,8 +435,7 @@ int main(int argc, char **argv) {
       gcvt(rr, 18, str_size_r);
     }
     char r_file_name[STRSIZE], s_file_name[STRSIZE];
-    strcpy(r_file_name,
-           strcat(strcat(strcat(r_skew, str_skew_r), str_size), str_size_r));
+    strcpy(r_file_name, strcat(strcat(strcat(r_skew, str_skew_r), str_size), str_size_r));
     gcvt(cmd_params.s_skew, 18, str_skew_s);
     double ss = cmd_params.s_size;
     if (ss >= 1024) {
@@ -465,8 +451,7 @@ int main(int argc, char **argv) {
     } else {
       gcvt(ss, 18, str_size_s);
     }
-    strcpy(s_file_name,
-           strcat(strcat(strcat(s_skew, str_skew_s), str_size), str_size_s));
+    strcpy(s_file_name, strcat(strcat(strcat(s_skew, str_skew_s), str_size), str_size_s));
     strcat(strcat(s_file_name, "_max="), str_size_r);
     printf("r_file_name = %s, s_file_name = %s\n", r_file_name, s_file_name);
     write_relation(&relR, r_file_name);
@@ -475,7 +460,11 @@ int main(int argc, char **argv) {
   } else {
     /* Run the selected join algorithm */
     printf("[INFO ] Running join algorithm %s ...\n", cmd_params.algo->name);
-
+#if SORTED
+    sort_rel(&relS);
+ //   sort_rel(&relR);
+    printf("sorting relation S is ok\n");
+#endif
     results = cmd_params.algo->joinAlgo(&relR, &relS, cmd_params.nthreads);
 
     printf("[INFO ] Results = %llu. DONE.\n", results->totalresults);
@@ -536,9 +525,10 @@ void print_version() {
 }
 
 static char *mystrdup(const char *s) {
-  char *ss = (char *)malloc(strlen(s) + 1);
+  char *ss = (char *) malloc(strlen(s) + 1);
 
-  if (ss != NULL) memcpy(ss, s, strlen(s) + 1);
+  if (ss != NULL)
+    memcpy(ss, s, strlen(s) + 1);
 
   return ss;
 }
@@ -553,43 +543,31 @@ void parse_args(int argc, char **argv, param_t *cmd_params) {
 
   while (1) {
     static struct option long_options[] = {
-        /* These options set a flag. */
-        {"verbose", no_argument, &verbose_flag, 1},
-        {"brief", no_argument, &verbose_flag, 0},
-        {"non-unique", no_argument, &nonunique_flag, 1},
-        {"full-range", no_argument, &fullrange_flag, 1},
-        {"basic-numa", no_argument, &basic_numa, 1},
-        {"help", no_argument, 0, 'h'},
-        {"version", no_argument, 0, 'v'},
-        /* These options don't set a flag.
-           We distinguish them by their indices. */
-        {"algo", required_argument, 0, 'a'},
-        {"nthreads", required_argument, 0, 'n'},
-        {"perfconf", required_argument, 0, 'p'},
-        {"r-size", required_argument, 0, 'r'},
-        {"s-size", required_argument, 0, 's'},
-        {"perfout", required_argument, 0, 'o'},
-        {"r-seed", required_argument, 0, 'x'},
-        {"s-seed", required_argument, 0, 'y'},
-        {"r-skew", required_argument, 0, 't'},
-        {"s-skew", required_argument, 0, 'z'},
-        {"r-file", required_argument, 0, 'R'},
-        {"s-file", required_argument, 0, 'S'},
-        {0, 0, 0, 0}};
+    /* These options set a flag. */
+    { "verbose", no_argument, &verbose_flag, 1 }, { "brief", no_argument, &verbose_flag, 0 }, { "non-unique", no_argument, &nonunique_flag, 1 }, { "full-range", no_argument,
+        &fullrange_flag, 1 }, { "basic-numa", no_argument, &basic_numa, 1 }, { "help", no_argument, 0, 'h' }, { "version", no_argument, 0, 'v' },
+    /* These options don't set a flag.
+     We distinguish them by their indices. */
+    { "algo", required_argument, 0, 'a' }, { "nthreads", required_argument, 0, 'n' }, { "perfconf", required_argument, 0, 'p' }, { "r-size", required_argument, 0, 'r' }, {
+        "s-size", required_argument, 0, 's' }, { "perfout", required_argument, 0, 'o' }, { "r-seed", required_argument, 0, 'x' }, { "s-seed", required_argument, 0, 'y' }, {
+        "r-skew", required_argument, 0, 't' }, { "s-skew", required_argument, 0, 'z' }, { "r-file", required_argument, 0, 'R' }, { "s-file", required_argument, 0, 'S' }, { 0, 0, 0,
+        0 } };
     /* getopt_long stores the option index here. */
     int option_index = 0;
 
-    c = getopt_long(argc, argv, "a:n:p:r:s:o:x:y:t:z:R:S:hv", long_options,
-                    &option_index);
+    c = getopt_long(argc, argv, "a:n:p:r:s:o:x:y:t:z:R:S:hv", long_options, &option_index);
 
     /* Detect the end of the options. */
-    if (c == -1) break;
+    if (c == -1)
+      break;
     switch (c) {
       case 0:
         /* If this option set a flag, do nothing else now. */
-        if (long_options[option_index].flag != 0) break;
+        if (long_options[option_index].flag != 0)
+          break;
         printf("option %s", long_options[option_index].name);
-        if (optarg) printf(" with arg %s", optarg);
+        if (optarg)
+          printf(" with arg %s", optarg);
         printf("\n");
         break;
 
@@ -684,7 +662,8 @@ void parse_args(int argc, char **argv, param_t *cmd_params) {
   /* Print any remaining command line arguments (not options). */
   if (optind < argc) {
     printf("non-option arguments: ");
-    while (optind < argc) printf("%s ", argv[optind++]);
+    while (optind < argc)
+      printf("%s ", argv[optind++]);
     printf("\n");
   }
 }

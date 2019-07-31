@@ -656,34 +656,44 @@ void morse_driven(void*param, ProbeFun fun, void*output) {
     args->num_results += fun(args->ht, &relS, output);
   }
 }
+bucket_buffer_t *overflowbuf[2];
+volatile static hashtable_t* ht[2];
+volatile static relation_t rel[2];
 void *npo_thread(void *param) {
   int rv;
   arg_t *args = (arg_t *) param;
   struct timeval t1, t2;
   int deltaT = 0, thread_num = 0;
   /* allocate overflow buffer for each thread */
-  bucket_buffer_t *overflowbuf;
-  init_bucket_buffer(&overflowbuf);
 
-#ifdef PERF_COUNTERS
+#if TEST_NUMA
   if (args->tid == 0) {
-    PCM_initPerformanceMonitor(NULL, NULL);
-    PCM_start();
+    uint32_t nbuckets = (args->relR.num_tuples / BUCKET_SIZE);
+    allocate_hashtable(&ht[args->tid], nbuckets);
+    init_bucket_buffer(&overflowbuf[args->tid]);
+    build_hashtable_mt(ht[args->tid], &args->relR, &overflowbuf[args->tid]);
+    rel[args->tid].num_tuples= args->relS.num_tuples;
+    rel[args->tid].tuples = (tuple_t*)alloc_aligned(rel[args->tid].num_tuples*sizeof(tuple_t));
+    memcpy(rel[args->tid].tuples,args->relS.tuples,rel[args->tid].num_tuples*sizeof(tuple_t));
   }
-#endif
-
-  /* wait at a barrier until each thread starts and start timer */
+  BARRIER_ARRIVE(args->barrier, rv);
+  if (args->tid == 1) {
+    uint32_t nbuckets = (args->relR.num_tuples / BUCKET_SIZE);
+    allocate_hashtable(&ht[args->tid], nbuckets);
+    init_bucket_buffer(&overflowbuf[args->tid]);
+    build_hashtable_mt(ht[args->tid], &args->relR, &overflowbuf[args->tid]);
+    rel[args->tid].num_tuples= args->relS.num_tuples;
+    rel[args->tid].tuples = (tuple_t*)alloc_aligned(rel[args->tid].num_tuples*sizeof(tuple_t));
+    memcpy(rel[args->tid].tuples,args->relS.tuples,rel[args->tid].num_tuples*sizeof(tuple_t));
+  }
+  BARRIER_ARRIVE(args->barrier, rv);
+  args->ht = ht[(args->tid) % 2];
+  args->relS.tuples=rel[(args->tid) % 2].tuples;
   BARRIER_ARRIVE(args->barrier, rv);
 
-#ifndef NO_TIMING
-  /* the first thread checkpoints the start time */
-  if (args->tid == 0) {
-    gettimeofday(&args->start, NULL);
-    startTimer(&args->timer1);
-    startTimer(&args->timer2);
-    args->timer3 = 0; /* no partitionig phase */
-  }
-#endif
+#else
+  bucket_buffer_t *overflowbuf;
+  init_bucket_buffer(&overflowbuf);
   gettimeofday(&t1, NULL);
   /* insert tuples from the assigned part of relR to the ht */
   build_hashtable_mt(args->ht, &args->relR, &overflowbuf);
@@ -697,23 +707,8 @@ void *npo_thread(void *param) {
     print_hashtable(args->ht);
     printf("size of bucket_t = %d\n", sizeof(bucket_t));
   }
-#ifdef PERF_COUNTERS
-  if (args->tid == 0) {
-    PCM_stop();
-    PCM_log("========== Build phase profiling results ==========\n");
-    PCM_printResults();
-    PCM_start();
-  }
-  /* Just to make sure we get consistent performance numbers */
-  BARRIER_ARRIVE(args->barrier, rv);
 #endif
 
-#ifndef NO_TIMING
-  /* build phase finished, thread-0 checkpoints the time */
-  if (args->tid == 0) {
-    stopTimer(&args->timer2);
-  }
-#endif
   if (args->tid == 0) {
     puts("+++++sleep begin+++++");
   }
@@ -823,34 +818,21 @@ void *npo_thread(void *param) {
   args->threadresult->threadid = args->tid;
 // args->threadresult->results = (void *)chainedbuf;
 #endif
-
-#ifndef NO_TIMING
-
-  /* for a reliable timing we have to wait until all finishes */
   BARRIER_ARRIVE(args->barrier, rv);
 
-  /* probe phase finished, thread-0 checkpoints the time */
+#if TEST_NUMA
   if (args->tid == 0) {
-    stopTimer(&args->timer1);
-    gettimeofday(&args->end, NULL);
+    destroy_hashtable(ht[0]);
+    destroy_hashtable(ht[1]);
+    free_bucket_buffer(overflowbuf[0]);
+    free_bucket_buffer(overflowbuf[1]);
+    delete_relation(&rel[0]);
+    delete_relation(&rel[1]);
   }
-#endif
-
-#ifdef PERF_COUNTERS
-  if (args->tid == 0) {
-    PCM_stop();
-    PCM_log("========== Probe phase profiling results ==========\n");
-    PCM_printResults();
-    PCM_log("===================================================\n");
-    PCM_cleanup();
-  }
-  /* Just to make sure we get consistent performance numbers */
-  BARRIER_ARRIVE(args->barrier, rv);
-#endif
-
+#else
   /* clean-up the overflow buffers */
   free_bucket_buffer(overflowbuf);
-
+#endif
   return 0;
 }
 
@@ -863,48 +845,59 @@ void tbb_run(relation_t *relR, relation_t *relS, int nthreads) {
   const auto add = [](const size_t& a, const size_t& b) {return a + b;};
   bucket_buffer_t *overflowbuf;
   hashtable_t *ht;
-
+  double start, end;
   init_bucket_buffer(&overflowbuf);
   uint32_t nbuckets = (relR->num_tuples / BUCKET_SIZE);
   allocate_hashtable(&ht, nbuckets);
   build_hashtable_mt(ht, relR, &overflowbuf);
-  uint64_t found2=0;
-  int morsesize = 100000;
-  if(nrThreads==1){
+  uint64_t found2 = 0;
+  int morsesize = MORSE_SIZE;
+  if (nrThreads == 1) {
     morsesize = relS->num_tuples;
   }
-  auto probe=[&](ProbeFun probe_fun){
-   found2 = tbb::parallel_reduce(range(0, relS->num_tuples, morsesize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
-    auto found = f;
-    relation_t rel;
-    chainedtuplebuffer_t *chainedbuf = chainedtuplebuffer_init();
+  auto probe = [&](ProbeFun probe_fun) {
+    found2 = tbb::parallel_reduce(range(0, relS->num_tuples, morsesize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+          auto found = f;
+          relation_t rel;
+          chainedtuplebuffer_t *chainedbuf = chainedtuplebuffer_init();
 
-    rel.num_tuples=r.end()-r.begin();
-    rel.tuples= relS->tuples+r.begin();
-    found+=probe_fun(ht,&rel,chainedbuf);
-    chainedtuplebuffer_free(chainedbuf);
+          rel.num_tuples=r.end()-r.begin();
+          rel.tuples= relS->tuples+r.begin();
+          found+=probe_fun(ht,&rel,chainedbuf);
+          chainedtuplebuffer_free(chainedbuf);
 
-    return found;
-  },
-                                     add);
+          return found;
+        },
+        add);
   };
   PerfEvents event;
   vector<pair<string, ProbeFun> > agg_name2fun;
-  int repetitions=5;
+  int repetitions = 5;
   agg_name2fun.push_back(make_pair("Naive", probe_hashtable));
-  agg_name2fun.push_back(make_pair("AMAC", probe_AMAC));
-  agg_name2fun.push_back(make_pair("FVA", probe_simd_amac));
-  agg_name2fun.push_back(make_pair("DVA", probe_simd_amac_raw));
   agg_name2fun.push_back(make_pair("SIMD", probe_simd));
+  agg_name2fun.push_back(make_pair("DVA", probe_simd_amac_raw));
+  agg_name2fun.push_back(make_pair("FVA", probe_simd_amac));
+  agg_name2fun.push_back(make_pair("AMAC", probe_AMAC));
   agg_name2fun.push_back(make_pair("IMV", smv_probe));
 
   for (auto name2fun : agg_name2fun) {
-    event.timeAndProfile(name2fun.first, 10000,[&](){ probe(name2fun.second);}, repetitions);
-
+#if 0
+    event.timeAndProfile(name2fun.first, 10000,[&]() {probe(name2fun.second);}, repetitions);
+#else
+    probe(name2fun.second);
+    start = gettime();
+    for (int j = 0; j < REPEAT_PROBE; j++) {
+      probe(name2fun.second);
+    }
+    end = gettime();
+    printf("total result num = %lld\t", found2);
+    printf("---- %5s probe costs time (ms) = %10.4lf\n", name2fun.first.c_str(), (end - start) * 1000 / REPEAT_PROBE);
+    sleep(5);
+#endif
   }
 //  event.timeAndProfile("imv_probe",10000,probe,2,0);
 
-  std::cout<<"num of results = "<<found2<<" threads = "<<nrThreads<<std::endl;
+  std::cout << "num of results = " << found2 << " threads = " << nrThreads << std::endl;
 //  leaveQuery(nrThreads);
   destroy_hashtable(ht);
 
@@ -913,8 +906,6 @@ void tbb_run(relation_t *relR, relation_t *relS, int nthreads) {
 
 /** \copydoc NPO */
 result_t *NPO(relation_t *relR, relation_t *relS, int nthreads) {
-
-
   hashtable_t *ht;
   int64_t result = 0;
   int32_t numR, numS, numRthr, numSthr; /* total and per thread num */
@@ -945,7 +936,7 @@ result_t *NPO(relation_t *relR, relation_t *relS, int nthreads) {
 #endif
   }
 
-  tbb_run(relR,relS,nthreads);
+  tbb_run(relR, relS, nthreads);
   joinresult->totalresults = result;
   joinresult->nthreads = nthreads;
   return joinresult;
@@ -979,11 +970,15 @@ result_t *NPO(relation_t *relR, relation_t *relS, int nthreads) {
     args[i].tid = i;
     args[i].ht = ht;
     args[i].barrier = &barrier;
-
+#if TEST_NUMA
+    args[i].relR.num_tuples = relR->num_tuples;
+    args[i].relR.tuples = relR->tuples;
+#else
     /* assing part of the relR for next thread */
     args[i].relR.num_tuples = (i == (nthreads - 1)) ? numR : numRthr;
     args[i].relR.tuples = relR->tuples + numRthr * i;
     numR -= numRthr;
+#endif
 #if DIVIDE
     /* assing part of the relS for next thread */
     args[i].relS.num_tuples = (i == (nthreads - 1)) ? numS : numSthr;

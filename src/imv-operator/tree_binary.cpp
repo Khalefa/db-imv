@@ -172,32 +172,37 @@ void morse_driven(void*param, BTSFun fun, void*output) {
     args->num_results += fun(args->tree, &relS, output);
   }
 }
+volatile static relation_t rel[2];
+volatile static tree_t tree_array[2];
+
 void *bts_thread(void *param) {
   int rv;
   total_num = 0;
   tree_arg_t *args = (tree_arg_t *)param;
   struct timeval t1, t2;
   int deltaT = 0;
-
-#ifdef PERF_COUNTERS
+#if TEST_NUMA
   if (args->tid == 0) {
-    PCM_initPerformanceMonitor(NULL, NULL);
-    PCM_start();
-  }
-#endif
+    build_tree_st(&tree_array[args->tid], &args->relR);
 
-  /* wait at a barrier until each thread starts and start timer */
+    rel[args->tid].num_tuples= args->relS.num_tuples;
+    rel[args->tid].tuples = (tuple_t*)alloc_aligned(rel[args->tid].num_tuples*sizeof(tuple_t));
+    memcpy(rel[args->tid].tuples,args->relS.tuples,rel[args->tid].num_tuples*sizeof(tuple_t));
+  }
   BARRIER_ARRIVE(args->barrier, rv);
+  if (args->tid == 1) {
+    build_tree_st(&tree_array[args->tid], &args->relR);
 
-#ifndef NO_TIMING
-  /* the first thread checkpoints the start time */
-  if (args->tid == 0) {
-    gettimeofday(&args->start, NULL);
-    startTimer(&args->timer1);
-    startTimer(&args->timer2);
-    args->timer3 = 0; /* no partitionig phase */
+    rel[args->tid].num_tuples= args->relS.num_tuples;
+    rel[args->tid].tuples = (tuple_t*)alloc_aligned(rel[args->tid].num_tuples*sizeof(tuple_t));
+    memcpy(rel[args->tid].tuples,args->relS.tuples,rel[args->tid].num_tuples*sizeof(tuple_t));
   }
-#endif
+  BARRIER_ARRIVE(args->barrier, rv);
+  args->tree = &tree_array[(args->tid) % 2];
+  args->relS.tuples=rel[(args->tid) % 2].tuples;
+  BARRIER_ARRIVE(args->barrier, rv);
+#else
+
   if (args->tid == 0) {
     gettimeofday(&t1, NULL);
     /* insert tuples from the assigned part of relR to the ht */
@@ -211,68 +216,9 @@ void *bts_thread(void *param) {
     printf("size of tnode_t = %d, total num = %lld\n", sizeof(tnode_t),
            args->tree->num);
   }
-
+#endif
   BARRIER_ARRIVE(args->barrier, rv);
-#ifdef PERF_COUNTERS
-  if (args->tid == 0) {
-    PCM_stop();
-    PCM_log("========== Build phase profiling results ==========\n");
-    PCM_printResults();
-    PCM_start();
-  }
-  /* Just to make sure we get consistent performance numbers */
-  BARRIER_ARRIVE(args->barrier, rv);
-#endif
 
-#ifndef NO_TIMING
-  /* build phase finished, thread-0 checkpoints the time */
-  if (args->tid == 0) {
-    stopTimer(&args->timer2);
-  }
-#endif
-  if (args->tid == 0) {
-    puts("+++++sleep begin+++++");
-  }
-  sleep(SLEEP_TIME);
-  if (args->tid == 0) {
-    puts("+++++sleep end  +++++");
-  }
-
-  ////////// compact, do two branches in the integration
-
-  /*chainedtuplebuffer_t *chainedbuf_compact = chainedtuplebuffer_init();
-  for (int rp = 0; rp < REPEAT_PROBE; ++rp) {
-    BARRIER_ARRIVE(args->barrier, rv);
-    gettimeofday(&t1, NULL);
-    args->num_results =
-        probe_simd_amac_compact2(args->ht, &args->relS, chainedbuf_compact);
-    lock(&g_lock);
-    #if DIVIDE
-    total_num += args->num_results;
-#else
-    total_num = args->num_results;
-#endif
-    unlock(&g_lock);
-    BARRIER_ARRIVE(args->barrier, rv);
-    if (args->tid == 0) {
-      printf("total result num = %lld\t", total_num);
-      gettimeofday(&t2, NULL);
-      deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-      printf("---- COMPACT2 probe costs time (ms) = %lf\n",
-             deltaT * 1.0 / 1000);
-      total_num = 0;
-    }
-  }
-  chainedtuplebuffer_free(chainedbuf_compact);
-  if (args->tid == 0) {
-    puts("+++++sleep begin+++++");
-  }
-  sleep(SLEEP_TIME);
-  if (args->tid == 0) {
-    puts("+++++sleep end  +++++");
-  }
-    //
-*/
   if (args->tid == 0) {
     strcpy(pfun[0].fun_name, "IMV");
     strcpy(pfun[1].fun_name, "AMAC");
@@ -339,7 +285,12 @@ void *bts_thread(void *param) {
   args->threadresult->threadid = args->tid;
 // args->threadresult->results = (void *)chainedbuf;
 #endif
-
+#if TEST_NUMA
+  if(args->tid==0){
+  chainedtnodebuffer_free(tree_array[0].buffer);
+  chainedtnodebuffer_free(tree_array[1].buffer);
+  }
+#endif
   return 0;
 }
 
@@ -353,10 +304,10 @@ static void tbb_run(relation_t *relR, relation_t *relS, int nthreads) {
   bucket_buffer_t *overflowbuf;
   tree_t *tree = (tree_t *)malloc(sizeof(tree_t));
   tree->buffer = NULL;
-
+  double start,end;
   build_tree_st(tree, relR);
   uint64_t found2=0;
-  int morsesize = 10000;
+  int morsesize = MORSE_SIZE;
   if(nrThreads==1){
     morsesize = relS->num_tuples;
   }
@@ -378,16 +329,28 @@ static void tbb_run(relation_t *relR, relation_t *relS, int nthreads) {
   PerfEvents event;
   vector<pair<string, BTSFun> > agg_name2fun;
   int repetitions=5;
-  agg_name2fun.push_back(make_pair("AMAC", search_tree_AMAC));
-  agg_name2fun.push_back(make_pair("FVA", bts_simd_amac));
-  agg_name2fun.push_back(make_pair("DVA", bts_simd_amac_raw));
-  agg_name2fun.push_back(make_pair("SIMD", bts_simd));
-  agg_name2fun.push_back(make_pair("IMV", bts_smv));
   agg_name2fun.push_back(make_pair("Naive", search_tree_raw));
+  agg_name2fun.push_back(make_pair("SIMD", bts_simd));
+  agg_name2fun.push_back(make_pair("DVA", bts_simd_amac_raw));
+  agg_name2fun.push_back(make_pair("FVA", bts_simd_amac));
+  agg_name2fun.push_back(make_pair("AMAC", search_tree_AMAC));
+  agg_name2fun.push_back(make_pair("IMV", bts_smv));
 
   for (auto name2fun : agg_name2fun) {
-    event.timeAndProfile(name2fun.first, 10000,[&](){ probe(name2fun.second);}, repetitions);
-
+#if 0
+    event.timeAndProfile(name2fun.first, 10000,[&]() {probe(name2fun.second);}, repetitions);
+#else
+    start = gettime();
+    for (int j = 0; j < REPEAT_PROBE; j++) {
+      probe(name2fun.second);
+    }
+    end = gettime();
+    printf("total result num = %lld\t", found2);
+    printf("---- %5s probe costs time (ms) = %10.4lf\n", name2fun.first.c_str(), (end - start) * 1000 / REPEAT_PROBE);
+    puts("+++++sleep begin+++++");
+    sleep(SLEEP_TIME);
+    puts("+++++sleep end  +++++");
+#endif
   }
 //  event.timeAndProfile("imv_probe",10000,probe,2,0);
 
@@ -500,9 +463,9 @@ result_t *BTS(relation_t *relR, relation_t *relS, int nthreads) {
   }
   joinresult->totalresults = result;
   joinresult->nthreads = nthreads;
-
+#if !TEST_NUMA
   chainedtnodebuffer_free(tree->buffer);
   free(tree);
-
+#endif
   return joinresult;
 }

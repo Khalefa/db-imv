@@ -76,7 +76,7 @@
 #endif
 
 /** Debug msg logging method */
-#ifdef DEBUG
+#ifndef DEBUG
 #define DEBUGMSG(COND, MSG, ...)                    \
   if (COND) {                                       \
     fprintf(stdout, "[DEBUG] " MSG, ##__VA_ARGS__); \
