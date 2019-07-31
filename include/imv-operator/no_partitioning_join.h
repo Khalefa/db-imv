@@ -140,5 +140,9 @@ result_t *NPO(relation_t *relR, relation_t *relS, int nthreads);
 result_t *NPO_st(relation_t *relR, relation_t *relS, int nthreads);
 result_t *PIPELINE(relation_t *relR, relation_t *relS, int nthreads);
 result_t *BTS(relation_t *relR, relation_t *relS, int nthreads);
-
+void allocate_hashtable(hashtable_t **ppht, uint32_t nbuckets);
+void destroy_hashtable(hashtable_t *ht);
+void get_new_bucket(bucket_t **result, bucket_buffer_t **buf);
+void init_bucket_buffer(bucket_buffer_t **ppbuf);
+void free_bucket_buffer(bucket_buffer_t *buf);
 #endif /* NO_PARTITIONING_JOIN_H */

@@ -256,6 +256,7 @@
 #include "imv-operator/affinity.h"      /* pthread_attr_setaffinity_np & sched_setaffinity */
 #include "imv-operator/config.h"     /* autoconf header */
 #include "imv-operator/prefetch.hpp"     /* autoconf header */
+#include "imv-operator/aggregation.hpp"
 
 #ifdef JOIN_RESULT_MATERIALIZE
 #include "imv-operator/tuple_buffer.hpp" /* for materialization */
@@ -304,7 +305,7 @@ extern int nthreads; /* defined in generator.c */
 static struct algo_t algos[] = { { "NPO", NPO },
 //                                {"PIPELINE", PIPELINE},
     { "BTS", BTS },
-//                                {"NPO_st", NPO_st}, /* NPO single threaded */
+                                {"AGG", AGG},
     { "GEN", NPO }, { { 0 }, 0 } };
 
 /* command line handling functions */

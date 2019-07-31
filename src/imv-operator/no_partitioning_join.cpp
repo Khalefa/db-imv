@@ -61,7 +61,7 @@ void init_bucket_buffer(bucket_buffer_t **ppbuf) {
  * @param result [out] the new bucket
  * @param buf [in,out] the pointer to the bucket_buffer_t pointer
  */
-static inline void get_new_bucket(bucket_t **result, bucket_buffer_t **buf) {
+void get_new_bucket(bucket_t **result, bucket_buffer_t **buf) {
   if ((*buf)->count < OVERFLOW_BUF_SIZE) {
     *result = (*buf)->buf + (*buf)->count;
     (*buf)->count++;

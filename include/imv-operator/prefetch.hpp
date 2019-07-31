@@ -36,7 +36,7 @@ typedef struct StateSIMD StateSIMD;
 //#define _mm512_mask_i64scatter_epi64(addr, mask, idx, v, scale) \
   _mm512_mask_compressstoreu_epi64(addr, mask, v);
 struct amac_state_t {
-  int64_t tuple_id;
+  int64_t tuple_id,key;
   bucket_t *b;
   int16_t stage;
 };
