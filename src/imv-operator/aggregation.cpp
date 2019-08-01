@@ -132,7 +132,7 @@ size_t agg_amac(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf)
 #define WORDSIZE 8
 size_t agg_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) {
   int32_t found = 0, k = 0, done = 0, num, num_temp;
-  __attribute__((aligned(64)))          __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict;
+  __attribute__((aligned(64)))           __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict;
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(rel->num_tuples * sizeof(tuple_t)), v_base_offset, v_ht_cell, v_factor = _mm512_set1_epi64(
       ht->hash_mask), v_shift = _mm512_set1_epi64(ht->skip_bits), v_cell_hash, v_neg_one512 = _mm512_set1_epi64(-1), v_zero512 = _mm512_set1_epi64(0), v_write_index =
       _mm512_set1_epi64(0), v_ht_addr = _mm512_set1_epi64((uint64_t) ht->buckets), v_word_size = _mm512_set1_epi64(WORDSIZE), v_tuple_size = _mm512_set1_epi64(sizeof(tuple_t)),
@@ -143,13 +143,13 @@ size_t agg_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) 
   uint64_t *pos = NULL, *new_bucket = (uint64_t*) &v_new_bucket;
   bucket_t * bucket;
   int tail_add = 0;
-  __attribute__((aligned(64)))          uint64_t cur_offset = 0, base_off[16], *ht_pos;
+  __attribute__((aligned(64)))           uint64_t cur_offset = 0, base_off[16], *ht_pos;
   for (int i = 0; i <= VECTOR_SCALE; ++i) {
     base_off[i] = i * sizeof(tuple_t);
     mask[i] = (1 << i) - 1;
   }
   v_base_offset = _mm512_load_epi64(base_off);
-  __attribute__((aligned(64)))          StateSIMD state[SIMDStateSize + 1];
+  __attribute__((aligned(64)))           StateSIMD state[SIMDStateSize + 1];
   // init # of the state
   for (int i = 0; i <= SIMDStateSize; ++i) {
     state[i].stage = 1;
@@ -214,8 +214,8 @@ size_t agg_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) 
           _mm_prefetch((char * )(ht_pos[i]), _MM_HINT_T0);
         }
 #endif
-        _mm_prefetch((char * )((*overflowbuf)->buf+(*overflowbuf)->count)+PDIS, _MM_HINT_T0);
-        _mm_prefetch((char * )((*overflowbuf)->buf+(*overflowbuf)->count)+PDIS+64, _MM_HINT_T0);
+//        _mm_prefetch((char * )((*overflowbuf)->buf+(*overflowbuf)->count)+PDIS, _MM_HINT_T0);
+//        _mm_prefetch((char * )((*overflowbuf)->buf+(*overflowbuf)->count)+PDIS+64, _MM_HINT_T0);
 
       }
         break;
@@ -242,26 +242,14 @@ size_t agg_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) 
           found += _mm_popcnt_u32(m_no_conflict);
         }
 
-        state[k].stage = 0;
         num = _mm_popcnt_u32(state[k].m_have_tuple);
-#if 1
         if (num == VECTOR_SCALE || done >= SIMDStateSize) {
-#if KNL
-          _mm512_mask_prefetch_i64gather_pd(
-              state[k].ht_off, state[k].m_have_tuple, 0, 1, _MM_HINT_T0);
-#else
-          ht_pos = (uint64_t *) &state[k].ht_off;
-          for (int i = 0; i < VECTOR_SCALE; ++i) {
-            _mm_prefetch((char * )(ht_pos[i]), _MM_HINT_T0);
-          }
-#endif
+          state[k].stage = 0;
+          --k;
         } else if (num == 0) {
           state[k].stage = 1;
           --k;
-          break;
-        } else
-#endif
-        {
+        } else {
           if (LIKELY(done < SIMDStateSize)) {
             num_temp = _mm_popcnt_u32(state[SIMDStateSize].m_have_tuple);
             if (num + num_temp < VECTOR_SCALE) {
@@ -277,7 +265,6 @@ size_t agg_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) 
               state[k].m_have_tuple = 0;
               state[k].stage = 1;
               --k;
-              break;
             } else {
               // expand temp -> v
               state[k].ht_off = _mm512_mask_expand_epi64(state[k].ht_off, _mm512_knot(state[k].m_have_tuple), state[SIMDStateSize].ht_off);
@@ -292,15 +279,7 @@ size_t agg_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) 
               state[k].m_have_tuple = mask[VECTOR_SCALE];
               state[SIMDStateSize].m_have_tuple = (state[SIMDStateSize].m_have_tuple >> (VECTOR_SCALE - num));
               state[k].stage = 0;
-#if KNL
-              _mm512_mask_prefetch_i64gather_pd(
-                  state[k].ht_off, state[k].m_have_tuple, 0, 1, _MM_HINT_T0);
-#else
-              ht_pos = (uint64_t *) &state[k].ht_off;
-              for (int i = 0; i < VECTOR_SCALE; ++i) {
-                _mm_prefetch((char * )(ht_pos[i]), _MM_HINT_T0);
-              }
-#endif
+              --k;
             }
           }
         }
@@ -430,7 +409,7 @@ size_t agg_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) 
 }
 size_t agg_DVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) {
   int32_t found = 0, k = 0, done = 0, num, num_temp;
-  __attribute__((aligned(64)))          __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict;
+  __attribute__((aligned(64)))           __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict;
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(rel->num_tuples * sizeof(tuple_t)), v_base_offset, v_ht_cell, v_factor = _mm512_set1_epi64(
       ht->hash_mask), v_shift = _mm512_set1_epi64(ht->skip_bits), v_cell_hash, v_neg_one512 = _mm512_set1_epi64(-1), v_zero512 = _mm512_set1_epi64(0), v_write_index =
       _mm512_set1_epi64(0), v_ht_addr = _mm512_set1_epi64((uint64_t) ht->buckets), v_word_size = _mm512_set1_epi64(WORDSIZE), v_tuple_size = _mm512_set1_epi64(sizeof(tuple_t)),
@@ -441,13 +420,13 @@ size_t agg_DVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) 
   uint64_t *pos = NULL, *new_bucket = (uint64_t*) &v_new_bucket;
   bucket_t * bucket;
   int tail_add = 0;
-  __attribute__((aligned(64)))          uint64_t cur_offset = 0, base_off[16], *ht_pos;
+  __attribute__((aligned(64)))           uint64_t cur_offset = 0, base_off[16], *ht_pos;
   for (int i = 0; i <= VECTOR_SCALE; ++i) {
     base_off[i] = i * sizeof(tuple_t);
     mask[i] = (1 << i) - 1;
   }
   v_base_offset = _mm512_load_epi64(base_off);
-  __attribute__((aligned(64)))          StateSIMD state[SIMDStateSize + 1];
+  __attribute__((aligned(64)))           StateSIMD state[SIMDStateSize + 1];
   // init # of the state
   for (int i = 0; i <= SIMDStateSize; ++i) {
     state[i].stage = 1;
@@ -613,7 +592,7 @@ size_t agg_DVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) 
 }
 size_t agg_FVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) {
   int32_t new_add = 0, k = 0, done = 0, num, num_temp, found = 0;
-  __attribute__((aligned(64)))          __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict, m_full = -1;
+  __attribute__((aligned(64)))           __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict, m_full = -1;
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(rel->num_tuples * sizeof(tuple_t)), v_base_offset, v_ht_cell, v_factor = _mm512_set1_epi64(
       ht->hash_mask), v_shift = _mm512_set1_epi64(ht->skip_bits), v_cell_hash, v_neg_one512 = _mm512_set1_epi64(-1), v_zero512 = _mm512_set1_epi64(0), v_write_index =
       _mm512_set1_epi64(0), v_ht_addr = _mm512_set1_epi64((uint64_t) ht->buckets), v_word_size = _mm512_set1_epi64(WORDSIZE), v_tuple_size = _mm512_set1_epi64(sizeof(tuple_t)),
@@ -624,13 +603,13 @@ size_t agg_FVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) 
   uint64_t *pos = NULL, *new_bucket = (uint64_t*) &v_new_bucket;
   bucket_t * bucket;
   int tail_add = 0;
-  __attribute__((aligned(64)))          uint64_t cur_offset = 0, base_off[16], *ht_pos;
+  __attribute__((aligned(64)))           uint64_t cur_offset = 0, base_off[16], *ht_pos;
   for (int i = 0; i <= VECTOR_SCALE; ++i) {
     base_off[i] = i * sizeof(tuple_t);
     mask[i] = (1 << i) - 1;
   }
   v_base_offset = _mm512_load_epi64(base_off);
-  __attribute__((aligned(64)))          StateSIMD state[SIMDStateSize];
+  __attribute__((aligned(64)))           StateSIMD state[SIMDStateSize];
   // init # of the state
   for (int i = 0; i < SIMDStateSize; ++i) {
     state[i].stage = 1;
@@ -793,7 +772,7 @@ size_t agg_FVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) 
 }
 size_t agg_SIMD(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) {
   int32_t new_add = 0, k = 0, done = 0, num, num_temp, found = 0;
-  __attribute__((aligned(64)))          __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict;
+  __attribute__((aligned(64)))           __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict;
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(rel->num_tuples * sizeof(tuple_t)), v_base_offset, v_ht_cell, v_factor = _mm512_set1_epi64(
       ht->hash_mask), v_shift = _mm512_set1_epi64(ht->skip_bits), v_cell_hash, v_neg_one512 = _mm512_set1_epi64(-1), v_zero512 = _mm512_set1_epi64(0), v_write_index =
       _mm512_set1_epi64(0), v_ht_addr = _mm512_set1_epi64((uint64_t) ht->buckets), v_word_size = _mm512_set1_epi64(WORDSIZE), v_tuple_size = _mm512_set1_epi64(sizeof(tuple_t)),
@@ -804,13 +783,13 @@ size_t agg_SIMD(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf)
   uint64_t *pos = NULL, *new_bucket = (uint64_t*) &v_new_bucket;
   bucket_t * bucket;
   int tail_add = 0;
-  __attribute__((aligned(64)))          uint64_t cur_offset = 0, base_off[16], *ht_pos;
+  __attribute__((aligned(64)))           uint64_t cur_offset = 0, base_off[16], *ht_pos;
   for (int i = 0; i <= VECTOR_SCALE; ++i) {
     base_off[i] = i * sizeof(tuple_t);
     mask[i] = (1 << i) - 1;
   }
   v_base_offset = _mm512_load_epi64(base_off);
-  __attribute__((aligned(64)))          StateSIMD state[1];
+  __attribute__((aligned(64)))           StateSIMD state[1];
   // init # of the state
   for (int i = 0; i < 1; ++i) {
     state[i].stage = 1;

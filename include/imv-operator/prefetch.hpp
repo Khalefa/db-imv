@@ -9,11 +9,11 @@
 using std::sort;
 typedef struct amac_state_t scalar_state_t;
 typedef struct StateSIMD StateSIMD;
-#define UNLIKELY(expr) __builtin_expect(!!(expr), 0)
-#define LIKELY(expr) __builtin_expect(!!(expr), 1)
+#define UNLIKELY(expr) expr //__builtin_expect(!!(expr), 0)
+#define LIKELY(expr) expr // __builtin_expect(!!(expr), 1)
 
 #define ScalarStateSize 20
-#define PDIS 192
+#define PDIS 320
 #define SIMDStateSize 5
 #define WRITE_RESULTS 1
 #define LOAD_FACTOR 1
@@ -26,7 +26,7 @@ typedef struct StateSIMD StateSIMD;
 #define DIVIDE 0
 #define USE_TBB 0
 #define AFFINITY 0
-#define MORSE_SIZE 100000
+#define MORSE_SIZE 1000000
 #define SORTED 0
 #define TEST_NUMA 1
 #if KNL
