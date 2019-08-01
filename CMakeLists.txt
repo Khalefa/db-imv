@@ -210,6 +210,7 @@ add_library(imv_operator
     src/imv-operator/tree_binary.cpp
     src/imv-operator/tree_binary_smv.cpp
     src/imv-operator/aggregation.cpp
+    src/imv-operator/build.cpp
   )
 target_include_directories(imv_operator PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

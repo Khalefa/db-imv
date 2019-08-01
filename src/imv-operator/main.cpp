@@ -257,6 +257,7 @@
 #include "imv-operator/config.h"     /* autoconf header */
 #include "imv-operator/prefetch.hpp"     /* autoconf header */
 #include "imv-operator/aggregation.hpp"
+#include "imv-operator/build.hpp"
 
 #ifdef JOIN_RESULT_MATERIALIZE
 #include "imv-operator/tuple_buffer.hpp" /* for materialization */
@@ -302,11 +303,7 @@ extern int numalocalize; /* defined in generator.c */
 extern int nthreads; /* defined in generator.c */
 
 /** all available algorithms */
-static struct algo_t algos[] = { { "NPO", NPO },
-//                                {"PIPELINE", PIPELINE},
-    { "BTS", BTS },
-                                {"AGG", AGG},
-    { "GEN", NPO }, { { 0 }, 0 } };
+static struct algo_t algos[] = { { "NPO", NPO }, { "BUILD", BUILD }, { "BTS", BTS }, { "AGG", AGG }, { "GEN", NPO }, { { 0 }, 0 } };
 
 /* command line handling functions */
 void print_help();
@@ -463,7 +460,7 @@ int main(int argc, char **argv) {
     printf("[INFO ] Running join algorithm %s ...\n", cmd_params.algo->name);
 #if SORTED
     sort_rel(&relS);
- //   sort_rel(&relR);
+    //   sort_rel(&relR);
     printf("sorting relation S is ok\n");
 #endif
     results = cmd_params.algo->joinAlgo(&relR, &relS, cmd_params.nthreads);
