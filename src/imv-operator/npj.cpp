@@ -93,7 +93,7 @@ int64_t probe_simd(hashtable_t *ht, relation_t *rel, void *output) {
 int64_t probe_simd_amac(hashtable_t *ht, relation_t *rel, void *output) {
   int64_t matches = 0;
   int32_t new_add = 0, k = 0, done = 0;
-  __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0;
+  __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0,m_full=-1;
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(rel->num_tuples * sizeof(tuple_t)), v_base_offset, v_ht_cell, v_factor = _mm512_set1_epi64(
       ht->hash_mask), v_shift = _mm512_set1_epi64(ht->skip_bits), v_cell_hash, v_neg_one512 = _mm512_set1_epi64(-1), v_zero512 = _mm512_set1_epi64(0), v_write_index =
       _mm512_set1_epi64(0), v_ht_addr = _mm512_set1_epi64((uint64_t)ht->buckets), v_word_size = _mm512_set1_epi64(WORDSIZE), v_tuple_size = _mm512_set1_epi64(sizeof(tuple_t)),
@@ -213,7 +213,15 @@ int64_t probe_simd_amac(hashtable_t *ht, relation_t *rel, void *output) {
         v_write_index = _mm512_add_epi64(v_write_index, v_word_size);
         _mm512_mask_i64scatter_epi64((void * )join_res, m_match, v_write_index, v_right_payload, 1);
         // return back every time
-        state[k].stage = 1;
+        if (m_full == state[k].m_have_tuple) {
+          ht_pos = (uint64_t *) &state[k].ht_off;
+          for (int i = 0; i < VECTOR_SCALE; ++i) {
+            _mm_prefetch((char * )(ht_pos[i]), _MM_HINT_T0);
+          }
+        } else {
+          state[k].stage = 1;
+          --k;
+        }
       }
         break;
     }

@@ -25,7 +25,7 @@ typedef struct StateSIMD StateSIMD;
 #define SEQPREFETCH PDIS
 #define DIVIDE 0
 #define USE_TBB 0
-#define AFFINITY 1
+#define AFFINITY 0
 #define MORSE_SIZE 100000
 #define SORTED 0
 #define TEST_NUMA 1

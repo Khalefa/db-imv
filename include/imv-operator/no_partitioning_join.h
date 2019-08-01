@@ -145,4 +145,5 @@ void destroy_hashtable(hashtable_t *ht);
 void get_new_bucket(bucket_t **result, bucket_buffer_t **buf);
 void init_bucket_buffer(bucket_buffer_t **ppbuf);
 void free_bucket_buffer(bucket_buffer_t *buf);
+void print_hashtable(hashtable_t * const ht);
 #endif /* NO_PARTITIONING_JOIN_H */
