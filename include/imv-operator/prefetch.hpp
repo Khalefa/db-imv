@@ -12,9 +12,9 @@ typedef struct StateSIMD StateSIMD;
 #define UNLIKELY(expr) expr //__builtin_expect(!!(expr), 0)
 #define LIKELY(expr) expr // __builtin_expect(!!(expr), 1)
 
-#define ScalarStateSize 40
+#define ScalarStateSize 20
 #define PDIS 320
-#define SIMDStateSize 8
+#define SIMDStateSize 3
 #define WRITE_RESULTS 1
 #define LOAD_FACTOR 1
 #define MULTI_TUPLE (BUCKET_SIZE - 1)
@@ -48,11 +48,38 @@ struct StateSIMD {
   __mmask8 m_have_tuple;
   char stage;
 };
+//struct Vec8u{
+//  union {
+//     __m512i reg;
+//     uint64_t entry[8];
+//  };
+//  // constructor
+//  Vec8u(uint64_t x) { reg = _mm512_set1_epi64(x); };
+//  Vec8u(void* p) { reg = _mm512_loadu_si512(p); };
+//  Vec8u(__m512i x) { reg = x; };
+//  Vec8u(uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3, uint64_t x4, uint64_t x5, uint64_t x6, uint64_t x7) { reg = _mm512_set_epi64(x0, x1, x2, x3, x4, x5, x6, x7); };
+//
+//  // implicit conversion to register
+//  operator __m512i() { return reg; }
+//
+//  // print vector (for debugging)
+//  friend std::ostream& operator<< (std::ostream& stream, const Vec8u& v) {
+//     for (auto& e : v.entry)
+//        stream << e << " ";
+//     return stream;
+//  }
+//};
 static bool cmp_tuples(tuple_t& a,tuple_t& b){
   return a.key<b.key;
 }
 inline void sort_rel(relation_t * rel){
   sort(rel->tuples,rel->tuples+rel->num_tuples,cmp_tuples);
 }
-
+inline void v_prefetch(__m512i& vec){
+  uint64_t * ht_pos = (uint64_t*)&vec;
+  for (int i = 0; i < VECTOR_SCALE; ++i) {
+    _mm_prefetch((char * )(ht_pos[i]), _MM_HINT_T0);
+//    _mm_prefetch(((char * )(ht_pos[i]) + 64), _MM_HINT_T0);
+  }
+}
 #endif /* SRC_PREFETCH_H_ */
