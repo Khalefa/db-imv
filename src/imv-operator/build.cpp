@@ -280,7 +280,7 @@ size_t build_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
           v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
           to_scatt = _mm512_kandn(m_no_conflict, m_to_insert);
           v_previous = _mm512_maskz_permutexvar_epi64(to_scatt, v_lzeros, v_new_bucket);
-          _mm512_mask_i64scatter_epi64(0, to_scatt, v_previous, v_new_bucket, 1);
+          _mm512_mask_i64scatter_epi64(0, to_scatt, _mm512_add_epi64(v_previous, v_next_off), v_new_bucket, 1);
 
           _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].ht_off, v_next_off), v_new_bucket, 1);
           found += _mm_popcnt_u32(m_to_insert);
@@ -494,7 +494,7 @@ size_t build_DVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
           v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
           to_scatt = _mm512_kandn(m_no_conflict, m_to_insert);
           v_previous = _mm512_maskz_permutexvar_epi64(to_scatt, v_lzeros, v_new_bucket);
-          _mm512_mask_i64scatter_epi64(0, to_scatt, v_previous, v_new_bucket, 1);
+          _mm512_mask_i64scatter_epi64(0, to_scatt,  _mm512_add_epi64(v_previous, v_next_off), v_new_bucket, 1);
 
           _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].ht_off, v_next_off), v_new_bucket, 1);
           found += _mm_popcnt_u32(m_to_insert);
@@ -665,7 +665,7 @@ size_t build_FVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
           v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
           to_scatt = _mm512_kandn(m_no_conflict, m_to_insert);
           v_previous = _mm512_maskz_permutexvar_epi64(to_scatt, v_lzeros, v_new_bucket);
-          _mm512_mask_i64scatter_epi64(0, to_scatt, v_previous, v_new_bucket, 1);
+          _mm512_mask_i64scatter_epi64(0, to_scatt,  _mm512_add_epi64(v_previous, v_next_off), v_new_bucket, 1);
 
           _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].ht_off, v_next_off), v_new_bucket, 1);
           found += _mm_popcnt_u32(m_to_insert);
@@ -810,6 +810,17 @@ volatile static struct Fun {
   char fun_name[8];
 } pfun[10];
 volatile static int pf_num = 0;
+static map<int64_t,int64_t>len2num;
+static void search_ht(hashtable_t *ht){
+  int64_t len=0;
+  for(int64_t i=0;i<ht->num_buckets;++i){
+    len=0;
+    for(auto it= ht->buckets+i;it;it=it->next){
+      len++;
+    }
+    len2num[len]++;
+  }
+}
 static void morse_driven(void*param, BuildFun fun, bucket_buffer_t **overflowbuf) {
   arg_t *args = (arg_t *) param;
   uint64_t base = 0, num = 0;
@@ -880,6 +891,9 @@ void *build_thread(void *param) {
 #else
       total_num = args->num_results;
 #endif
+#if PRINT_HT
+      search_ht(ht);
+#endif
       unlock(&g_lock);
       BARRIER_ARRIVE(args->barrier, rv);
       if (args->tid == 0) {
@@ -889,6 +903,13 @@ void *build_thread(void *param) {
         printf("---- %5s BUILD costs time (ms) = %10.4lf , tid = %3d\n", pfun[fid].fun_name, deltaT * 1.0 / 1000, args->tid);
         total_num = 0;
         global_curse = 0;
+        for(auto iter:len2num){
+          cout<<"ht  cnum = "<<iter.first<<" , times = "<<iter.second<<endl;
+          if(total_num++>20)
+            break;
+        }
+        total_num=0;
+        len2num.clear();
       }
       destroy_hashtable(ht);
       free_bucket_buffer(overflowbuf);
