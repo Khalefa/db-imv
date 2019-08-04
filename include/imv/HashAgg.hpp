@@ -2,9 +2,9 @@
 #include "head.hpp"
 #define ORDERKEY 1
 #if ORDERKEY
-#define HT_SIZE 15000000
+#define HT_SIZE 150000
 #else
-#define HT_SIZE 10000000
+#define HT_SIZE 100000
 #endif
 #define PARTITION_SIZE 4096
 struct AMACState {

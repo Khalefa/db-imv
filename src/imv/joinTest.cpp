@@ -318,7 +318,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
           }
         }
         results_addrs_.resize(entry_addrs_.size());
-        auto found = agg_imv_merged(0,entry_addrs_.size(),db,&ht,nullptr,(void**)&entry_addrs_[0],(void**)&results_addrs_[0]);
+        auto found = aggFun(0,entry_addrs_.size(),db,&ht,nullptr,(void**)&entry_addrs_[0],(void**)&results_addrs_[0]);
         if(found>0) {
           auto block = result->createBlock(found);
           auto ret = reinterpret_cast<types::Integer*>(block.data(retAttr));
@@ -346,8 +346,8 @@ void test_agg(Database& db, size_t nrThreads) {
   // agg_name2fun.push_back(make_pair("agg_simd", agg_simd));
   // sleep(10);
   agg_name2fun.push_back(make_pair("agg_imv_merged", agg_imv_merged));
-//  agg_name2fun.push_back(make_pair("agg_imv_hybrid", agg_imv_hybrid));
-//  agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
+  agg_name2fun.push_back(make_pair("agg_imv_hybrid", agg_imv_hybrid));
+  agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
   agg_name2fun.push_back(make_pair("agg_imv_serial", agg_imv_serial));
   agg_name2fun.push_back(make_pair("agg_gp", agg_gp));
   agg_name2fun.push_back(make_pair("agg_amac", agg_amac));

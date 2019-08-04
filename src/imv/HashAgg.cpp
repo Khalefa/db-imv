@@ -431,9 +431,9 @@ inline void insertNewEntry(AggState& state, Vec8u& u_new_addrs, __mmask8 m_no_co
     }
   }
   // write entry->next
-//  _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs.reg,v_zero,1);
+  _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs.reg,v_zero,1);
   // write entry->hash
-//  _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs + u_offset_hash,state.v_probe_hash,1);
+  _mm512_mask_i64scatter_epi64(0,m_no_conflict,u_new_addrs + u_offset_hash,state.v_probe_hash,1);
   // write entry->k , NOTE it is 32 bits
   _mm512_mask_i64scatter_epi32(0,m_no_conflict,u_new_addrs + u_offset_k,_mm512_cvtepi64_epi32(state.v_probe_keys),1);
   // write entry->v
@@ -1090,7 +1090,7 @@ imvNum1 = imvNum;
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (m_no_conflict) {
-          count(1);
+//          count(1);
           if (nullptr == entry_addrs) {
             insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
             // insert the new addresses to the hash table
@@ -1177,7 +1177,7 @@ imvNum1 = imvNum;
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (m_no_conflict) {
-         count(0);
+//         count(0);
           if (nullptr == entry_addrs) {
             insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
             // insert the new addresses to the hash table
@@ -1236,12 +1236,12 @@ imvNum1 = imvNum;
     }
     ++k;
   }
-  for(auto iter:diff_first){
-    cout<<"first num = "<<iter.first<<" , times = "<<iter.second<<endl;
-  }
-  for(auto iter:diff_tail){
-    cout<<"tail num = "<<iter.first<<" , times = "<<iter.second<<endl;
-  }
+//  for(auto iter:diff_first){
+//    cout<<"first num = "<<iter.first<<" , times = "<<iter.second<<endl;
+//  }
+//  for(auto iter:diff_tail){
+//    cout<<"tail num = "<<iter.first<<" , times = "<<iter.second<<endl;
+//  }
   return found;
 }
 
