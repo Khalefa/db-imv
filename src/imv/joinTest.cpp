@@ -241,7 +241,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
 // global aggregation: each thread process some partitions
 // aggregate from spill partitions
   auto nrPartitions = partitionedDeques.begin()->getPartitions().size();
-#if 0
+#if 01
   tbb::parallel_for(0ul, nrPartitions, [&](auto partitionNr) {
         bool exist=false;
         auto& ht = hash_table.local(exist);
@@ -256,7 +256,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
           partition.postConstruct(nrThreads * 4, sizeof(group_t));
         }
         /* aggregate values from all deques for partitionNr     */
-#if 01
+#if 0
         auto& localEntries = entries.local();
         localEntries.clear();
         for (auto& deque : partitionedDeques) {
@@ -266,7 +266,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
                 end = value + partition.size(chunk, sizeof(group_t));
                 value < end; value++) {
               value->h.next = nullptr;/*NOTE: get rid of searching old next in the new hash table*/
-              if(value->k>agg_constrant) continue;
+//              if(value->k>agg_constrant) continue;
               auto entry = ht.findOneEntry(value->k,value->h.hash);
               if(!entry) {
                 localEntries.emplace_back(value->h.hash,value->k,types::Numeric<12, 2>());
@@ -318,7 +318,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
           }
         }
         results_addrs_.resize(entry_addrs_.size());
-        auto found = aggFun(0,entry_addrs_.size(),db,&ht,nullptr,(void**)&entry_addrs_[0],(void**)&results_addrs_[0]);
+        auto found = agg_imv_merged(0,entry_addrs_.size(),db,&ht,nullptr,(void**)&entry_addrs_[0],(void**)&results_addrs_[0]);
         if(found>0) {
           auto block = result->createBlock(found);
           auto ret = reinterpret_cast<types::Integer*>(block.data(retAttr));
@@ -345,9 +345,9 @@ void test_agg(Database& db, size_t nrThreads) {
   vector<pair<string, decltype(aggFun)> > agg_name2fun;
   // agg_name2fun.push_back(make_pair("agg_simd", agg_simd));
   // sleep(10);
-//  agg_name2fun.push_back(make_pair("agg_imv_merged", agg_imv_merged));
+  agg_name2fun.push_back(make_pair("agg_imv_merged", agg_imv_merged));
 //  agg_name2fun.push_back(make_pair("agg_imv_hybrid", agg_imv_hybrid));
-  agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
+//  agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
   agg_name2fun.push_back(make_pair("agg_imv_serial", agg_imv_serial));
   agg_name2fun.push_back(make_pair("agg_gp", agg_gp));
   agg_name2fun.push_back(make_pair("agg_amac", agg_amac));
@@ -908,12 +908,12 @@ int main(int argc, char* argv[]) {
     nrThreads = atoi(argv[3]);
 
   tbb::task_scheduler_init scheduler(nrThreads);
-//  probe_test(tpch, nrThreads);
-//  probe_test_disorder(tpch, nrThreads);
+  //  probe_test(tpch, nrThreads);
+  //  probe_test_disorder(tpch, nrThreads);
 //  pipeline(tpch, nrThreads);
 //join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
-   test_agg(tpch, nrThreads);
+  test_agg(tpch, nrThreads);
 
 // test_vectorwise_probe(tpch, nrThreads);
 // test_vectorwise_sel_probe(tpch, nrThreads);

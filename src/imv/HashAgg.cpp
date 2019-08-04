@@ -991,8 +991,8 @@ map<int,int>diff_first;
 map<int,int>diff_tail;
 auto count=[&](int flag){
 //  auto num = _mm_popcnt_u32(_mm512_kandn(m_no_conflict,m_to_insert));
-  auto num = _mm_popcnt_u32((m_no_conflict));
-
+//  auto num = _mm_popcnt_u32((m_no_conflict));
+  auto num = _mm_popcnt_u32((m_to_insert))-_mm_popcnt_u32((m_no_conflict));
   if(flag){
     diff_first[num]++;
   }else{
@@ -1078,13 +1078,19 @@ imvNum1 = imvNum;
         v_new_addr = _mm512_mask_i64gather_epi64(v_all_ones,state[k].m_valid_probe,v_hash_mask, (const long long int* )hash_table->entries, 8);
         m_match = _mm512_cmpneq_epi64_mask(v_new_addr,v_zero);
         m_to_insert = _mm512_kandn(m_match,state[k].m_valid_probe);
+        if(0==m_to_insert){
+          state[k].v_bucket_addrs =v_new_addr;
+          state[k].stage = 0;
+          --k;
+          break;
+        }
         v_hash_mask = _mm512_mask_blend_epi64(state[k].m_valid_probe, v_all_ones, v_hash_mask);
 #endif
         v_conflict = _mm512_conflict_epi64(v_hash_mask);
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (m_no_conflict) {
-      //    count(1);
+          count(1);
           if (nullptr == entry_addrs) {
             insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
             // insert the new addresses to the hash table
@@ -1150,6 +1156,7 @@ imvNum1 = imvNum;
         /// step 6: compare the probe keys and build keys and write points
         m_match = _mm512_cmpeq_epi64_mask(state[k].v_probe_keys, v_ht_keys);
         m_match = _mm512_kand(m_match, state[k].m_valid_probe);
+        if(m_match){
         /// update the aggregators
         v_conflict = _mm512_conflict_epi64(state[k].v_bucket_addrs);
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
@@ -1160,7 +1167,7 @@ imvNum1 = imvNum;
           state[k].m_valid_probe = _mm512_kandn(m_no_conflict, state[k].m_valid_probe);
           // the remaining matches, DO NOT get next
           m_match = _mm512_kandn(m_no_conflict, m_match);
-
+        }
         /// step 7: NOT found, then insert
         v_next = _mm512_mask_i64gather_epi64(v_all_ones, _mm512_kandn(m_match, state[k].m_valid_probe), state[k].v_bucket_addrs, nullptr, 1);
         m_to_insert = _mm512_kand(_mm512_kandn(m_match, state[k].m_valid_probe), _mm512_cmpeq_epi64_mask(v_next, v_zero));
@@ -1170,7 +1177,7 @@ imvNum1 = imvNum;
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (m_no_conflict) {
-    //      count(0);
+         count(0);
           if (nullptr == entry_addrs) {
             insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
             // insert the new addresses to the hash table
@@ -1229,12 +1236,12 @@ imvNum1 = imvNum;
     }
     ++k;
   }
-//  for(auto iter:diff_first){
-//    cout<<"first num = "<<iter.first<<" , times = "<<iter.second<<endl;
-//  }
-//  for(auto iter:diff_tail){
-//    cout<<"tail num = "<<iter.first<<" , times = "<<iter.second<<endl;
-//  }
+  for(auto iter:diff_first){
+    cout<<"first num = "<<iter.first<<" , times = "<<iter.second<<endl;
+  }
+  for(auto iter:diff_tail){
+    cout<<"tail num = "<<iter.first<<" , times = "<<iter.second<<endl;
+  }
   return found;
 }
 
@@ -1409,12 +1416,12 @@ size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::In
         /// step 6: compare the probe keys and build keys and write points
         m_match = _mm512_cmpeq_epi64_mask(state[k].v_probe_keys, v_ht_keys);
         m_match = _mm512_kand(m_match, state[k].m_valid_probe);
-
+        if(m_match){
         v_ht_value = _mm512_mask_i64gather_epi64(v_zero, m_match, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg), nullptr, 1);
         _mm512_mask_i64scatter_epi64(0, m_match, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg), _mm512_add_epi64(state[k].v_probe_value, v_ht_value), 1);
 
         state[k].m_valid_probe = _mm512_kandn(m_match, state[k].m_valid_probe);
-
+        }
         /// step 7: NOT found, then insert
         v_next = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_valid_probe, state[k].v_bucket_addrs, nullptr, 1);
         m_to_insert = _mm512_kand(state[k].m_valid_probe, _mm512_cmpeq_epi64_mask(v_next, v_zero));

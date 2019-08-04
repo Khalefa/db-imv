@@ -181,6 +181,7 @@ add_library(imv
     src/imv/HashAgg.cpp
     src/imv/HashBuildSSB.cpp
     src/imv/PipelineSSB.cpp
+    src/imv/PipelineTPCH.cpp
   )
 target_include_directories(imv PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -266,7 +267,7 @@ target_include_directories(tpch PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
-target_link_libraries(tpch benchmark_config pthread hyper ${TBB_LIBRARIES} vectorwise common)
+target_link_libraries(tpch imv benchmark_config pthread hyper ${TBB_LIBRARIES} vectorwise common)
 
 add_executable(run_tpch
   ${HYPER_TRANSLATORS}
@@ -276,7 +277,7 @@ target_include_directories(run_tpch PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     PRIVATE src)
-target_link_libraries(run_tpch tpch hyper vectorwise common ${JEVENTSLIB})
+target_link_libraries(run_tpch imv tpch hyper vectorwise common ${JEVENTSLIB})
 
 file(GLOB SBBQUERIES src/benchmarks/sbb/queries/*.cpp)
 add_library(ssb
