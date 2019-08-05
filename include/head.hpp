@@ -3,6 +3,8 @@
 #include "common/runtime/Database.hpp"
 #include "vectorwise/Operators.hpp"
 #include <assert.h>
+#include <sys/time.h>
+
 #include "common/Compat.hpp"
 #include "common/runtime/Concurrency.hpp"
 #include "common/runtime/SIMD.hpp"
@@ -46,3 +48,25 @@ inline void v_prefetch(__m512i& vec){
     _mm_prefetch(((char * )(ht_pos[i]) + 64), _MM_HINT_T0);
   }
 }
+class PipelineTimer {
+ public:
+  std::vector<std::pair<std::string, double>> pipeline_cost_time;
+  inline void reset(){
+    pipeline_cost_time.clear();
+  }
+  inline double gettime() {
+    struct timeval now_tv;
+    gettimeofday(&now_tv, NULL);
+    return ((double) now_tv.tv_sec) + ((double) now_tv.tv_usec) / 1000000.0;
+  }
+  inline void log_time(std::string pipeline_name) {
+    pipeline_cost_time.push_back(make_pair(pipeline_name, gettime()));
+  }
+  inline void print(){
+    for (int i = 1; i < pipeline_cost_time.size(); ++i) {
+      double run_time = pipeline_cost_time[i].second - pipeline_cost_time[i - 1].second;
+      cout << pipeline_cost_time[i].first << " cost time = " << run_time * 1e3 << std::endl;
+    }
+    reset();
+  }
+};

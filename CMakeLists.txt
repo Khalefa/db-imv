@@ -182,6 +182,7 @@ add_library(imv
     src/imv/HashBuildSSB.cpp
     src/imv/PipelineSSB.cpp
     src/imv/PipelineTPCH.cpp
+    src/imv/PipelineBuild.cpp
   )
 target_include_directories(imv PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -397,3 +398,17 @@ endif()
     PRIVATE src)
 
   target_link_libraries(operator imv_operator imv tpch hyper vectorwise)
+  
+ add_executable(engine src/imv/engine.cpp)
+if(!KNL)
+  SET_TARGET_PROPERTIES(join_test PROPERTIES
+    COMPILE_FLAGS "-march=skylake-avx512"
+    )
+endif()
+  target_include_directories(engine PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    PRIVATE src)
+
+  target_link_libraries(engine imv tpch hyper vectorwise  ${JEVENTSLIB})
+  

@@ -1,5 +1,5 @@
 #include "imv/Pipeline.hpp"
-auto c3 = types::Integer(50);
+auto c3 = types::Integer(24);
 uint64_t constrants = c3.value * 100;
 size_t scan_filter_simd(types::Numeric<12, 2>* col, size_t& begin, size_t end, int constrants, uint64_t* pos_buff) {
   size_t found = 0;

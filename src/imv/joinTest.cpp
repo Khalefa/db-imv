@@ -655,7 +655,7 @@ bool probe_test_disorder(Database& db, size_t nrThreads) {
   return true;
 }
 
-auto pipeline_date = types::Date::castString("1996-01-01");
+auto constrant_o_orderdate = types::Date::castString("1996-01-01");
 bool pipeline(Database& db, size_t nrThreads) {
 
   auto resources = initQuery(nrThreads);
@@ -689,7 +689,7 @@ bool pipeline(Database& db, size_t nrThreads) {
     auto found = f;
     auto& entries = entries1.local();
     for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
-      if(o_orderdate[i] < pipeline_date) {
+      if(o_orderdate[i] < constrant_o_orderdate) {
 #if PIPELINE_ORDERED
         entries.emplace_back(ht1.hash(o_orderkey[i]), o_orderkey[i]);
 #else
@@ -766,7 +766,7 @@ bool pipeline(Database& db, size_t nrThreads) {
   return true;
 }
 
-types::Numeric<12, 2> pipeline_num = types::Numeric<12, 2>(types::Integer(24));
+types::Numeric<12, 2> constrant_l_quantity = types::Numeric<12, 2>(types::Integer(24));
 
 std::unique_ptr<Q3Builder::Q3> Q3Builder::getQuery() {
   using namespace vectorwise;
@@ -788,7 +788,7 @@ std::unique_ptr<Q3Builder::Q3> Q3Builder::getQuery() {
   Select(Expression().addOp(BF(primitives::sel_less_Date_col_Date_val),  //
                             Buffer(sel_order, sizeof(pos_t)),  //
                             Column(order, "o_orderdate"),  //
-                            Value(&pipeline_date)));
+                            Value(&constrant_o_orderdate)));
 ///////////NOTE the order
   auto lineitem = Scan("lineitem");
 
@@ -797,7 +797,7 @@ std::unique_ptr<Q3Builder::Q3> Q3Builder::getQuery() {
       .addOp(BF(vectorwise::primitives::sel_less_int64_t_col_int64_t_val),  //
              Buffer(sel_cust, sizeof(pos_t)),  //
              Column(lineitem, "l_quantity"),  //
-             Value(&pipeline_num))));
+             Value(&constrant_l_quantity))));
 
   HashJoin(Buffer(cust_ord, sizeof(pos_t)), vectorJoinFun)  //
       .setProbeSelVector(Buffer(sel_cust), vectorJoinFun).addBuildKey(Column(order, "o_orderkey"), Buffer(sel_order), conf.hash_sel_int32_t_col(),
