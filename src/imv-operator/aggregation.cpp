@@ -140,9 +140,8 @@ size_t agg_amac(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf)
   return new_add;
 }
 #define WORDSIZE 8
-__m512i v_one = _mm512_set1_epi64(1), v_63 = _mm512_set1_epi64(63), v_all_ones = _mm512_set1_epi64(-1), v_lzeros;
-uint64_t* pos_lz = (uint64_t*) &v_lzeros;
-uint64_t* pos_v = (uint64_t*) &v_one;
+__m512i v_one = _mm512_set1_epi64(1), v_63 = _mm512_set1_epi64(63), v_all_ones = _mm512_set1_epi64(-1);
+
 void print_vector(string name, __m512i vec) {
   uint64_t* pos = (uint64_t*) &vec;
   cout << name << " : ";
@@ -157,10 +156,15 @@ void mergeKeys(StateSIMD& state) {
   __mmask8 m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
   m_no_conflict = _mm512_kand(m_no_conflict, state.m_have_tuple);
   __mmask8 m_conflict = _mm512_kandn(m_no_conflict, state.m_have_tuple);
-  v_lzeros = _mm512_lzcnt_epi64(v_conflict);
+  if(0==m_conflict) return;
+  __m512i v_lzeros = _mm512_lzcnt_epi64(v_conflict);
+  v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
+  uint64_t* pos_lz = (uint64_t*) &v_lzeros;
+  __m512i v_one = _mm512_set1_epi64(1);
+  uint64_t* pos_v = (uint64_t*) &v_one;
   for (int i = VECTOR_SCALE - 1; i >= 0; --i) {
     if ((m_conflict & (1 << i))) {
-      pos_v[63 - pos_lz[i]] += pos_v[i];
+      pos_v[pos_lz[i]] += pos_v[i];
     }
   }
   state.m_have_tuple = m_no_conflict;
@@ -867,6 +871,7 @@ size_t agg_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) 
       case 2: {
         /////////////////// random access
         // check valid bucket
+//        mergeKeys(state[k]);
         v_ht_cell = _mm512_mask_i64gather_epi64(v_neg_one512, state[k].m_have_tuple, state[k].ht_off, 0, 1);
         // inset new nodes
         m_to_insert = _mm512_cmpeq_epi64_mask(v_ht_cell, v_zero512);

@@ -1,4 +1,6 @@
 #include "imv/HashAgg.hpp"
+
+#include <stdlib.h>
 int agg_constrant = 50;
 std::map<uint64_t, uint64_t> match_counts, bucket_counts, end_counts;
 __m512i v_all_ones = _mm512_set1_epi64(-1), v_zero = _mm512_set1_epi64(0), v_63 = _mm512_set1_epi64(63);
@@ -443,13 +445,14 @@ inline void mergeKeys(AggState& state) {
   auto v_conflict = _mm512_conflict_epi64(state.v_probe_keys);
   auto m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
   m_no_conflict = _mm512_kand(m_no_conflict, state.m_valid_probe);
-  uint64_t* pos_k = (uint64_t*) &state.v_probe_keys;
+  auto m_conflict = _mm512_kandn(m_no_conflict, state.m_valid_probe);
+  if(0==m_conflict) return;
   uint64_t* pos_v = (uint64_t*) &state.v_probe_value;
   auto v_lzeros = _mm512_lzcnt_epi64(v_conflict);
   v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
   uint64_t* pos_lz = (uint64_t*) &v_lzeros;
   for (int i = VECTORSIZE - 1; i >= 0; --i) {
-    if (!(m_no_conflict & (1 << i))) {
+    if ((m_conflict & (1 << i))) {
       pos_v[pos_lz[i]] += pos_v[i];
     }
   }
@@ -828,6 +831,8 @@ size_t agg_imv_hybrid(size_t begin, size_t end, Database& db, Hashmapx<types::In
           } else {
             // set the next of entries = 0
             _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset, v_zero, 1);
+            // must write back the merged values!!!!!!!
+            _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset + u_offset_v, state[k].v_probe_value, 1);
             _mm512_mask_i64scatter_epi64((long long int* )hash_table->entries, m_no_conflict, v_hash_mask, state[k].v_probe_offset, 8);
             _mm512_mask_compressstoreu_epi64((results_entry + found), m_no_conflict, state[k].v_probe_offset);
           }
@@ -1354,6 +1359,8 @@ size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::In
           } else {
             // set the next of entries = 0
             _mm512_mask_i64scatter_epi64(nullptr, m_to_insert, state[k].v_probe_offset, v_zero, 1);
+            // must write back the merged values!!!!!!!
+            _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset + u_offset_v, state[k].v_probe_value, 1);
             // write the addresses to the previous'next
             v_lzeros = _mm512_lzcnt_epi64(v_conflict);
             v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
@@ -1438,6 +1445,8 @@ size_t agg_imv_merged(size_t begin, size_t end, Database& db, Hashmapx<types::In
           } else {
             // set the next of entries = 0
             _mm512_mask_i64scatter_epi64(nullptr, m_to_insert, state[k].v_probe_offset, v_zero, 1);
+            // must write back the merged values!!!!!!!
+            _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset + u_offset_v, state[k].v_probe_value, 1);
             // write the addresses to the previous'next
             v_lzeros = _mm512_lzcnt_epi64(v_conflict);
             v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);

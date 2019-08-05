@@ -198,7 +198,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
       auto name = reinterpret_cast<types::Integer*>(block.data(nameAttr));
       auto sum = reinterpret_cast<types::Numeric<12, 2>*>(block.data(sumAttr));
       for (size_t i = 0; i < elementsInBlock; ++i) {
-        if(name[i].value>agg_constrant || name[i].value< agg_constrant-10) continue;
+//        if(name[i].value>agg_constrant || name[i].value< agg_constrant-10) continue;
         cout << name[i] << "\t" << sum[i] << endl;
       }
     }
@@ -336,7 +336,7 @@ bool agg_intkey(Database& db, size_t nrThreads) {
 
 #endif
       });
-//  printResult(resources.query->result.get());
+  printResult(resources.query->result.get());
 #endif
   leaveQuery(nrThreads);
   return true;
@@ -345,13 +345,13 @@ void test_agg(Database& db, size_t nrThreads) {
   vector<pair<string, decltype(aggFun)> > agg_name2fun;
   // agg_name2fun.push_back(make_pair("agg_simd", agg_simd));
   // sleep(10);
-  agg_name2fun.push_back(make_pair("agg_imv_merged", agg_imv_merged));
+//  agg_name2fun.push_back(make_pair("agg_imv_merged", agg_imv_merged));
   agg_name2fun.push_back(make_pair("agg_imv_hybrid", agg_imv_hybrid));
-  agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
-  agg_name2fun.push_back(make_pair("agg_imv_serial", agg_imv_serial));
-  agg_name2fun.push_back(make_pair("agg_gp", agg_gp));
-  agg_name2fun.push_back(make_pair("agg_amac", agg_amac));
-  agg_name2fun.push_back(make_pair("agg_raw", agg_raw));
+//  agg_name2fun.push_back(make_pair("agg_imv1", agg_imv1));
+//  agg_name2fun.push_back(make_pair("agg_imv_serial", agg_imv_serial));
+//  agg_name2fun.push_back(make_pair("agg_gp", agg_gp));
+//  agg_name2fun.push_back(make_pair("agg_amac", agg_amac));
+//  agg_name2fun.push_back(make_pair("agg_raw", agg_raw));
 
   PerfEvents event;
   uint64_t found2 = 0;

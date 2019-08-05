@@ -36,6 +36,32 @@ using vectorwise::primitives::hash_t;
 //  group by
 //    l_returnflag,
 //    l_linestatus
+void printResultQ1(BlockRelation* result) {
+  size_t found = 0;
+  auto retAttr = result->getAttribute("l_returnflag");
+  auto statusAttr = result->getAttribute("l_linestatus");
+  auto qtyAttr = result->getAttribute("sum_qty");
+  auto base_priceAttr = result->getAttribute("sum_base_price");
+  auto disc_priceAttr = result->getAttribute("sum_disc_price");
+  auto chargeAttr = result->getAttribute("sum_charge");
+  auto count_orderAttr = result->getAttribute("count_order");
+  for (auto& block : *result) {
+    auto elementsInBlock = block.size();
+    found += elementsInBlock;
+    auto ret = reinterpret_cast<Char<1>*>(block.data(retAttr));
+    auto status = reinterpret_cast<Char<1>*>(block.data(statusAttr));
+    auto qty = reinterpret_cast<types::Numeric<12, 2>*>(block.data(qtyAttr));
+    auto base = reinterpret_cast<types::Numeric<12, 2>*>(block.data(base_priceAttr));
+    auto disc = reinterpret_cast<types::Numeric<12, 2>*>(block.data(disc_priceAttr));
+    auto charge = reinterpret_cast<types::Numeric<12, 2>*>(block.data(chargeAttr));
+    auto order = reinterpret_cast<int64_t*>(block.data(count_orderAttr));
+
+    for (size_t i = 0; i < elementsInBlock; ++i) {
+      cout << ret[i] << "\t" << status[i] << "\t" << qty[i] << "\t" << base[i] << "\t" << disc[i] << "\t" << charge[i] << "\t" << order[i] << endl;
+    }
+  }
+  cout << "total results number = " << found << endl;
+}
 
 NOVECTORIZE std::unique_ptr<runtime::Query> q1_hyper(Database& db, size_t nrThreads) {
   using namespace types;
@@ -53,8 +79,8 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q1_hyper(Database& db, size_t nrThre
 
   auto resources = initQuery(nrThreads);
 
-  using hash = runtime::CRC32Hash;
-
+//  using hash = runtime::CRC32Hash;
+  using hash = runtime::MurMurHash;
   auto groupOp = make_GroupBy<tuple<Char<1>, Char<1>>, tuple<Numeric<12, 2>, Numeric<12, 2>, Numeric<12, 4>, Numeric<12, 6>, int64_t>, hash>(
       [](auto& acc, auto&& value) {
         get<0>(acc) += get<0>(value);
@@ -68,17 +94,17 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q1_hyper(Database& db, size_t nrThre
   tbb::parallel_for(tbb::blocked_range<size_t>(0, li.nrTuples, morselSize), [&](const tbb::blocked_range<size_t>& r) {
     auto locals = groupOp.preAggLocals();
     for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
-      if (l_shipdate[i] <= c1) {
-        auto& group = locals.getGroup(make_tuple(l_returnflag[i], l_linestatus[i]));
+      //    if (l_shipdate[i] <= c1) {
+                    auto& group = locals.getGroup(make_tuple(l_returnflag[i], l_linestatus[i]));
 
-        get<0>(group) += l_quantity[i];
-        get<1>(group) += l_extendedprice[i];
-        auto disc_price = l_extendedprice[i] * (one - l_discount[i]);
-        get<2>(group) += disc_price;
-        auto charge = disc_price * (one + l_tax[i]);
-        get<3>(group) += charge;
-        get<4>(group) += 1;
-      }
+                    get<0>(group) += l_quantity[i];
+                    get<1>(group) += l_extendedprice[i];
+                    auto disc_price = l_extendedprice[i] * (one - l_discount[i]);
+                    get<2>(group) += disc_price;
+                    auto charge = disc_price * (one + l_tax[i]);
+                    get<3>(group) += charge;
+                    get<4>(group) += 1;
+                    //   }
     }
   });
 
@@ -116,7 +142,7 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q1_hyper(Database& db, size_t nrThre
     }
     block.addedElements(n);
   });
-
+  printResultQ1(result.get());
   leaveQuery(nrThreads);
   return move(resources.query);
 }
@@ -165,44 +191,11 @@ std::unique_ptr<runtime::Query> q1_rof(Database& db, size_t nrThreads) {
     if(!exist) {
       partition.postConstruct(nrThreads * 4, sizeof(group_t));
     }
-    found += agg_raw_q1(r.begin(),r.end(),db,&ht,&partition,nullptr,nullptr);
+    found += agg_imv_q1(r.begin(),r.end(),db,&ht,&partition,nullptr,nullptr);
     return found;
   },
                                      add);
-  cout << "local agg num = " << found2 << endl;
-
-
-
-
-
-
-  auto groupOp = make_GroupBy<tuple<Char<1>, Char<1>>, tuple<Numeric<12, 2>, Numeric<12, 2>, Numeric<12, 4>, Numeric<12, 6>, int64_t>, hash>(
-      [](auto& acc, auto&& value) {
-        get<0>(acc) += get<0>(value);
-        get<1>(acc) += get<1>(value);
-        get<2>(acc) += get<2>(value);
-        get<3>(acc) += get<3>(value);
-        get<4>(acc) += get<4>(value);
-      },
-      make_tuple(Numeric<12, 2>(), Numeric<12, 2>(), Numeric<12, 4>(), Numeric<12, 6>(), int64_t(0)), nrThreads);
-
-  tbb::parallel_for(tbb::blocked_range<size_t>(0, li.nrTuples, morselSize), [&](const tbb::blocked_range<size_t>& r) {
-    auto locals = groupOp.preAggLocals();
-    for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
-      if (l_shipdate[i] <= c1) {
-        auto& group = locals.getGroup(make_tuple(l_returnflag[i], l_linestatus[i]));
-
-        get<0>(group) += l_quantity[i];
-        get<1>(group) += l_extendedprice[i];
-        auto disc_price = l_extendedprice[i] * (one - l_discount[i]);
-        get<2>(group) += disc_price;
-        auto charge = disc_price * (one + l_tax[i]);
-        get<3>(group) += charge;
-        get<4>(group) += 1;
-      }
-    }
-  });
-
+//  cout << "local agg num = " << found2 << endl;
   auto& result = resources.query->result;
   auto retAttr = result->addAttribute("l_returnflag", sizeof(Char<1> ));
   auto statusAttr = result->addAttribute("l_linestatus", sizeof(Char<1> ));
@@ -212,31 +205,70 @@ std::unique_ptr<runtime::Query> q1_rof(Database& db, size_t nrThreads) {
   auto chargeAttr = result->addAttribute("sum_charge", sizeof(Numeric<12, 2> ));
   auto count_orderAttr = result->addAttribute("count_order", sizeof(int64_t));
 
-  groupOp.forallGroups([&](runtime::Stack<decltype(groupOp)::group_t>& /*auto&*/entries) {
-    auto n = entries.size();
-    auto block = result->createBlock(n);
-    auto ret = reinterpret_cast<Char<1>*>(block.data(retAttr));
-    auto status = reinterpret_cast<Char<1>*>(block.data(statusAttr));
-    auto qty = reinterpret_cast<Numeric<12, 2>*>(block.data(qtyAttr));
-    auto base_price =
-    reinterpret_cast<Numeric<12, 2>*>(block.data(base_priceAttr));
-    auto disc_price =
-    reinterpret_cast<Numeric<12, 4>*>(block.data(disc_priceAttr));
-    auto charge = reinterpret_cast<Numeric<12, 6>*>(block.data(chargeAttr));
-    auto count_order =
-    reinterpret_cast<int64_t*>(block.data(count_orderAttr));
-    for (auto block : entries)
-    for (auto& entry : block) {
-      *ret++ = get<0>(entry.k);
-      *status++ = get<1>(entry.k);
-      *qty++ = get<0>(entry.v);
-      *base_price++ = get<1>(entry.v);
-      *disc_price++ = get<2>(entry.v);
-      *charge++ = get<3>(entry.v);
-      *count_order++ = get<4>(entry.v);
+  // global aggregation
+  auto nrPartitions = partitionedDeques.begin()->getPartitions().size();
+
+  tbb::parallel_for(0ul, nrPartitions, [&](auto partitionNr) {
+    bool exist=false;
+    auto& ht = hash_table.local(exist);
+    if(!exist) {
+      ht.setSize(1024);
     }
-    block.addedElements(n);
+    ht.clear();
+    auto& partition = partitionedDeques.local(exist);
+    if(!exist) {
+      partition.postConstruct(nrThreads * 4, sizeof(group_t));
+    }
+
+    /*  collect entry addresses from a partition */
+
+    auto& entry_addrs_ = entry_addrs.local();
+    entry_addrs_.clear();
+    auto& results_addrs_ = results_addrs.local();
+    results_addrs_.clear();
+    for (auto& deque : partitionedDeques) {
+      auto& partition = deque.getPartitions()[partitionNr];
+      for (auto chunk = partition.first; chunk; chunk = chunk->next) {
+        for (auto value = chunk->template data<group_t>(), end = value + partition.size(chunk, sizeof(group_t)); value < end; value++) {
+          entry_addrs_.push_back(value);
+        }
+      }
+    }
+    results_addrs_.resize(entry_addrs_.size());
+    auto found = agg_imv_q1(0,entry_addrs_.size(),db,&ht,nullptr,(void**)&entry_addrs_[0],(void**)&results_addrs_[0]);
+    if(found>0) {
+      auto block = result->createBlock(found);
+      auto ret = reinterpret_cast<Char<1>*>(block.data(retAttr));
+      auto status = reinterpret_cast<Char<1>*>(block.data(statusAttr));
+      auto qty = reinterpret_cast<Numeric<12, 2>*>(block.data(qtyAttr));
+      auto base_price =
+      reinterpret_cast<Numeric<12, 2>*>(block.data(base_priceAttr));
+      auto disc_price =
+      reinterpret_cast<Numeric<12, 4>*>(block.data(disc_priceAttr));
+      auto charge = reinterpret_cast<Numeric<12, 6>*>(block.data(chargeAttr));
+      auto count_order =
+      reinterpret_cast<int64_t*>(block.data(count_orderAttr));
+
+      for(int i=0;i<found;++i) {
+       auto values = (uint64_t*) (((char*) results_addrs_[i]) + offsetof(group_t, v));
+        *ret++ = Char<1>::build((((char*)&(results_addrs_[i]->k))+0));
+        *status++ = Char<1>::build(((char*)&(results_addrs_[i]->k))+1);
+        qty->value = *values;
+        base_price->value = *(values+1);
+        disc_price->value = *(values+2);
+        charge->value = *(values+3);
+        *count_order = *(values+4);
+        ++qty;
+        ++base_price;
+        ++disc_price;
+        ++charge;
+        ++count_order;
+      }
+      block.addedElements(found);
+    }
+
   });
+  printResultQ1(result.get());
 
   leaveQuery(nrThreads);
   return move(resources.query);
@@ -303,6 +335,7 @@ std::unique_ptr<runtime::Query> q1_vectorwise(Database& db, size_t nrThreads, si
     result = move(
         dynamic_cast<ResultWriter*>(query->rootOp.get())->shared.result);
   });
+//  printResultQ1(result.get()->result.get());
 
   return result;
 }
