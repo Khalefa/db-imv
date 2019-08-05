@@ -20,14 +20,14 @@
 #define VECTORSIZE 8
 #define ROF_VECTOR_SIZE 10000
 #define PDIS 1024
-#define PDISD 64
+#define PDISD 128
 #define EARLY_BREAK 1
 #define SEQ_PREFETCH 1
 #define WRITE_SEQ_PREFETCH 0
 #define WRITE_RESULTS 1
 #define WRITE_PDIS 0
 static int stateNum = vectorwise::Hashjoin::stateNum;
-static int stateNumSIMD = vectorwise::Hashjoin::imvNum;
+static int stateNumSIMD =  vectorwise::Hashjoin::imvNum;
 
 #define UNLIKELY(expr) __builtin_expect(!!(expr), 0)
 #define LIKELY(expr) __builtin_expect(!!(expr), 1)

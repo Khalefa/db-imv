@@ -62,7 +62,6 @@ void printResultQ1(BlockRelation* result) {
   }
   cout << "total results number = " << found << endl;
 }
-
 NOVECTORIZE std::unique_ptr<runtime::Query> q1_hyper(Database& db, size_t nrThreads) {
   using namespace types;
   using namespace std;
@@ -94,7 +93,7 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q1_hyper(Database& db, size_t nrThre
   tbb::parallel_for(tbb::blocked_range<size_t>(0, li.nrTuples, morselSize), [&](const tbb::blocked_range<size_t>& r) {
     auto locals = groupOp.preAggLocals();
     for (size_t i = r.begin(), end = r.end(); i != end; ++i) {
-      //    if (l_shipdate[i] <= c1) {
+//          if (l_shipdate[i] <= c1) {
                     auto& group = locals.getGroup(make_tuple(l_returnflag[i], l_linestatus[i]));
 
                     get<0>(group) += l_quantity[i];
@@ -104,7 +103,7 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q1_hyper(Database& db, size_t nrThre
                     auto charge = disc_price * (one + l_tax[i]);
                     get<3>(group) += charge;
                     get<4>(group) += 1;
-                    //   }
+//                       }
     }
   });
 
@@ -146,7 +145,7 @@ NOVECTORIZE std::unique_ptr<runtime::Query> q1_hyper(Database& db, size_t nrThre
   leaveQuery(nrThreads);
   return move(resources.query);
 }
-std::unique_ptr<runtime::Query> q1_rof(Database& db, size_t nrThreads) {
+std::unique_ptr<runtime::Query> q1_imv(Database& db, size_t nrThreads) {
   using namespace types;
   using namespace std;
   types::Date c1 = types::Date::castString("1998-09-02");
@@ -236,6 +235,134 @@ std::unique_ptr<runtime::Query> q1_rof(Database& db, size_t nrThreads) {
     }
     results_addrs_.resize(entry_addrs_.size());
     auto found = agg_imv_q1(0,entry_addrs_.size(),db,&ht,nullptr,(void**)&entry_addrs_[0],(void**)&results_addrs_[0]);
+    if(found>0) {
+      auto block = result->createBlock(found);
+      auto ret = reinterpret_cast<Char<1>*>(block.data(retAttr));
+      auto status = reinterpret_cast<Char<1>*>(block.data(statusAttr));
+      auto qty = reinterpret_cast<Numeric<12, 2>*>(block.data(qtyAttr));
+      auto base_price =
+      reinterpret_cast<Numeric<12, 2>*>(block.data(base_priceAttr));
+      auto disc_price =
+      reinterpret_cast<Numeric<12, 4>*>(block.data(disc_priceAttr));
+      auto charge = reinterpret_cast<Numeric<12, 6>*>(block.data(chargeAttr));
+      auto count_order =
+      reinterpret_cast<int64_t*>(block.data(count_orderAttr));
+
+      for(int i=0;i<found;++i) {
+       auto values = (uint64_t*) (((char*) results_addrs_[i]) + offsetof(group_t, v));
+        *ret++ = Char<1>::build((((char*)&(results_addrs_[i]->k))+0));
+        *status++ = Char<1>::build(((char*)&(results_addrs_[i]->k))+1);
+        qty->value = *values;
+        base_price->value = *(values+1);
+        disc_price->value = *(values+2);
+        charge->value = *(values+3);
+        *count_order = *(values+4);
+        ++qty;
+        ++base_price;
+        ++disc_price;
+        ++charge;
+        ++count_order;
+      }
+      block.addedElements(found);
+    }
+
+  });
+  printResultQ1(result.get());
+
+  leaveQuery(nrThreads);
+  return move(resources.query);
+}
+
+std::unique_ptr<runtime::Query> q1_rof(Database& db, size_t nrThreads) {
+  using namespace types;
+  using namespace std;
+  types::Date c1 = types::Date::castString("1998-09-02");
+  types::Numeric<12, 2> one = types::Numeric<12, 2>::castString("1.00");
+  auto& li = db["lineitem"];
+  auto l_returnflag = li["l_returnflag"].data<types::Char<1>>();
+  auto l_linestatus = li["l_linestatus"].data<types::Char<1>>();
+  auto l_extendedprice = li["l_extendedprice"].data<types::Numeric<12, 2>>();
+  auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
+  auto l_tax = li["l_tax"].data<types::Numeric<12, 2>>();
+  auto l_quantity = li["l_quantity"].data<types::Numeric<12, 2>>();
+  auto l_shipdate = li["l_shipdate"].data<types::Date>();
+
+  auto resources = initQuery(nrThreads);
+  using hash = runtime::MurMurHash;
+  using range = tbb::blocked_range<size_t>;
+  const auto add = [](const size_t& a, const size_t& b) {return a + b;};
+
+  tbb::enumerable_thread_specific<Hashmapx<types::Integer, tuple<Numeric<12, 2>, Numeric<12, 2>, Numeric<12, 4>, Numeric<12, 6>, int64_t>, hash, false>> hash_table;
+
+  using group_t = typename decltype(hash_table)::value_type::Entry;
+
+  /// Memory for materialized entries in hashmap
+  tbb::enumerable_thread_specific<runtime::Stack<group_t>> entries;
+  /// Memory for spilling hastable entries
+  tbb::enumerable_thread_specific<runtime::PartitionedDeque<PARTITION_SIZE>> partitionedDeques;
+  /// globally collect entry addresses
+  tbb::enumerable_thread_specific<vector<group_t*>> entry_addrs;
+  tbb::enumerable_thread_specific<vector<group_t*>> results_addrs;
+
+  // local aggregation
+  auto found2 = tbb::parallel_reduce(range(0, li.nrTuples, morselSize), 0, [&](const tbb::blocked_range<size_t>& r, const size_t& f) {
+    auto found = f;
+    bool exist=false;
+    auto& ht = hash_table.local(exist);
+
+    if(!exist) {
+      ht.setSize(1024);
+
+    }
+    auto& partition = partitionedDeques.local(exist);
+    if(!exist) {
+      partition.postConstruct(nrThreads * 4, sizeof(group_t));
+    }
+    found += agg_gp_q1(r.begin(),r.end(),db,&ht,&partition,nullptr,nullptr);
+    return found;
+  },
+                                     add);
+//  cout << "local agg num = " << found2 << endl;
+  auto& result = resources.query->result;
+  auto retAttr = result->addAttribute("l_returnflag", sizeof(Char<1> ));
+  auto statusAttr = result->addAttribute("l_linestatus", sizeof(Char<1> ));
+  auto qtyAttr = result->addAttribute("sum_qty", sizeof(Numeric<12, 2> ));
+  auto base_priceAttr = result->addAttribute("sum_base_price", sizeof(Numeric<12, 2> ));
+  auto disc_priceAttr = result->addAttribute("sum_disc_price", sizeof(Numeric<12, 2> ));
+  auto chargeAttr = result->addAttribute("sum_charge", sizeof(Numeric<12, 2> ));
+  auto count_orderAttr = result->addAttribute("count_order", sizeof(int64_t));
+
+  // global aggregation
+  auto nrPartitions = partitionedDeques.begin()->getPartitions().size();
+
+  tbb::parallel_for(0ul, nrPartitions, [&](auto partitionNr) {
+    bool exist=false;
+    auto& ht = hash_table.local(exist);
+    if(!exist) {
+      ht.setSize(1024);
+    }
+    ht.clear();
+    auto& partition = partitionedDeques.local(exist);
+    if(!exist) {
+      partition.postConstruct(nrThreads * 4, sizeof(group_t));
+    }
+
+    /*  collect entry addresses from a partition */
+
+    auto& entry_addrs_ = entry_addrs.local();
+    entry_addrs_.clear();
+    auto& results_addrs_ = results_addrs.local();
+    results_addrs_.clear();
+    for (auto& deque : partitionedDeques) {
+      auto& partition = deque.getPartitions()[partitionNr];
+      for (auto chunk = partition.first; chunk; chunk = chunk->next) {
+        for (auto value = chunk->template data<group_t>(), end = value + partition.size(chunk, sizeof(group_t)); value < end; value++) {
+          entry_addrs_.push_back(value);
+        }
+      }
+    }
+    results_addrs_.resize(entry_addrs_.size());
+    auto found = agg_gp_q1(0,entry_addrs_.size(),db,&ht,nullptr,(void**)&entry_addrs_[0],(void**)&results_addrs_[0]);
     if(found>0) {
       auto block = result->createBlock(found);
       auto ret = reinterpret_cast<Char<1>*>(block.data(retAttr));

@@ -180,7 +180,8 @@ size_t agg_gp_q1(size_t begin, size_t end, Database& db,
         state[k].probeKey = entry->k.value;
       }
       state[k].stage = 0;
-      hash_table->PrefetchEntry(state[k].probeHash);
+      if (stateNum > 1)
+        hash_table->PrefetchEntry(state[k].probeHash);
     }
     valid_size = k;
     done = 0;
@@ -193,8 +194,10 @@ size_t agg_gp_q1(size_t begin, size_t end, Database& db,
         state[k].stage = 4;
         ++done;
       } else {
-        _mm_prefetch((char * )(state[k].buildMatch), _MM_HINT_T0);
-        _mm_prefetch((char * )(state[k].buildMatch) + 64, _MM_HINT_T0);
+        if (stateNum > 1) {
+          _mm_prefetch((char * )(state[k].buildMatch), _MM_HINT_T0);
+          _mm_prefetch((char * )(state[k].buildMatch) + 64, _MM_HINT_T0);
+        }
       }
     }
     /// step 3: repeating probing the hash buckets
@@ -229,8 +232,10 @@ size_t agg_gp_q1(size_t begin, size_t end, Database& db,
         } else {
           // not found, then continue
           state[k].buildMatch = entryHeader;
-          _mm_prefetch((char * )(entryHeader), _MM_HINT_T0);
-          _mm_prefetch((char * )(entryHeader) + 64, _MM_HINT_T0);
+          if (stateNum > 1) {
+            _mm_prefetch((char * )(entryHeader), _MM_HINT_T0);
+            _mm_prefetch((char * )(entryHeader) + 64, _MM_HINT_T0);
+          }
         }
       }
     }
@@ -320,8 +325,9 @@ size_t agg_amac_q1(size_t begin, size_t end, Database& db,
           state[k].probeKey = entry->k.value;
         }
         ++cur;
-        hash_table->PrefetchEntry(state[k].probeHash);
         state[k].stage = 2;
+        if (stateNum > 1)
+          hash_table->PrefetchEntry(state[k].probeHash);
       }
         break;
       case 2: {
@@ -330,8 +336,10 @@ size_t agg_amac_q1(size_t begin, size_t end, Database& db,
           state[k].stage = 4;
           --k;  // must immediately shift to case 4
         } else {
-          _mm_prefetch((char * )(state[k].buildMatch), _MM_HINT_T0);
-          _mm_prefetch((char * )(state[k].buildMatch) + 64, _MM_HINT_T0);
+          if (stateNum > 1) {
+            _mm_prefetch((char * )(state[k].buildMatch), _MM_HINT_T0);
+            _mm_prefetch((char * )(state[k].buildMatch) + 64, _MM_HINT_T0);
+          }
           state[k].stage = 0;
         }
       }
@@ -356,8 +364,10 @@ size_t agg_amac_q1(size_t begin, size_t end, Database& db,
           --k;  // must immediately shift to case 4
         } else {
           state[k].buildMatch = entryHeader;
-          _mm_prefetch((char * )(entryHeader), _MM_HINT_T0);
-          _mm_prefetch((char * )(entryHeader) + 64, _MM_HINT_T0);
+          if (stateNum > 1) {
+            _mm_prefetch((char * )(entryHeader), _MM_HINT_T0);
+            _mm_prefetch((char * )(entryHeader) + 64, _MM_HINT_T0);
+          }
         }
       }
         break;
@@ -397,7 +407,7 @@ size_t agg_amac_q1(size_t begin, size_t end, Database& db,
 struct __attribute__((aligned(64))) AggStateQ1 {
   __m512i v_probe_keys;
   __m512i v_bucket_addrs;
-  __m512i v_probe_offset, v_probe_hash,v_probe_value[5];
+  __m512i v_probe_offset, v_probe_hash, v_probe_value[5];
   __mmask8 m_valid_probe;
   uint8_t stage;
   AggStateQ1()
@@ -405,7 +415,7 @@ struct __attribute__((aligned(64))) AggStateQ1 {
         v_bucket_addrs(_mm512_set1_epi64(0)),
         v_probe_offset(_mm512_set1_epi64(0)),
         m_valid_probe(0),
-        stage(1){
+        stage(1) {
   }
   void reset() {
     v_probe_keys = _mm512_set1_epi64(0);
@@ -478,13 +488,14 @@ inline void mergeKeys(AggStateQ1& state) {
   auto v_conflict = _mm512_conflict_epi64(v_keys);
   auto m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
   m_no_conflict = _mm512_kand(m_no_conflict, state.m_valid_probe);
-  if(m_no_conflict==0) return;
+  if (m_no_conflict == 0)
+    return;
   uint64_t* pos_v[5];
-  pos_v[0]= (uint64_t*) &state.v_probe_value[0];
-  pos_v[1]= (uint64_t*) &state.v_probe_value[1];
-  pos_v[2]= (uint64_t*) &state.v_probe_value[2];
-  pos_v[3]= (uint64_t*) &state.v_probe_value[3];
-  pos_v[4]= (uint64_t*) &state.v_probe_value[4];
+  pos_v[0] = (uint64_t*) &state.v_probe_value[0];
+  pos_v[1] = (uint64_t*) &state.v_probe_value[1];
+  pos_v[2] = (uint64_t*) &state.v_probe_value[2];
+  pos_v[3] = (uint64_t*) &state.v_probe_value[3];
+  pos_v[4] = (uint64_t*) &state.v_probe_value[4];
   auto m_conflict = _mm512_kandn(m_no_conflict, state.m_valid_probe);
 
   auto v_lzeros = _mm512_lzcnt_epi64(v_conflict);
@@ -508,13 +519,14 @@ inline void mergeKeys_(AggStateQ1& state) {
   auto v_conflict = _mm512_conflict_epi64(v_keys);
   auto m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
   m_no_conflict = _mm512_kand(m_no_conflict, state.m_valid_probe);
-  if(m_no_conflict==0) return;
+  if (m_no_conflict == 0)
+    return;
   uint64_t* pos_v[5];
-  pos_v[0]= (uint64_t*) &state.v_probe_value[0];
-  pos_v[1]= (uint64_t*) &state.v_probe_value[1];
-  pos_v[2]= (uint64_t*) &state.v_probe_value[2];
-  pos_v[3]= (uint64_t*) &state.v_probe_value[3];
-  pos_v[4]= (uint64_t*) &state.v_probe_value[4];
+  pos_v[0] = (uint64_t*) &state.v_probe_value[0];
+  pos_v[1] = (uint64_t*) &state.v_probe_value[1];
+  pos_v[2] = (uint64_t*) &state.v_probe_value[2];
+  pos_v[3] = (uint64_t*) &state.v_probe_value[3];
+  pos_v[4] = (uint64_t*) &state.v_probe_value[4];
   auto m_conflict = _mm512_kandn(m_no_conflict, state.m_valid_probe);
 
   auto v_lzeros = _mm512_lzcnt_epi64(v_conflict);
@@ -537,8 +549,8 @@ size_t agg_imv_q1(size_t begin, size_t end, Database& db,
                   Hashmapx<types::Integer, tuple<Numeric<12, 2>, Numeric<12, 2>, Numeric<12, 4>, Numeric<12, 6>, int64_t>, hashFun, false>* hash_table,
                   PartitionedDeque<PARTITION_SIZE>* partition, void** entry_addrs, void** results_entry) {
   size_t found = 0, pos = 0, cur = begin;
-  int k = 0, done = 0, buildkey, probeKey, valid_size, imvNum = vectorwise::Hashjoin::imvNum, imvNum1 = vectorwise::Hashjoin::imvNum + 1;
-  AggStateQ1 state[stateNumSIMD + 2];
+  int k = 0, done = 0, buildkey, probeKey, valid_size, imvNum = stateNumSIMD;
+  AggStateQ1 state[stateNumSIMD + 1];
   hash_t probeHash;
   types::Date c1 = types::Date::castString("1998-09-02");
   types::Numeric<12, 2> one = types::Numeric<12, 2>::castString("1.00");
@@ -580,15 +592,13 @@ size_t agg_imv_q1(size_t begin, size_t end, Database& db,
       }
     }
     if (done >= imvNum) {
-      if (state[imvNum1].m_valid_probe > 0) {
-        k = imvNum1;
+
+      if (state[imvNum].m_valid_probe > 0) {
+        k = imvNum;
       } else {
-        if (state[imvNum].m_valid_probe > 0) {
-          k = imvNum;
-        } else {
-          break;
-        }
+        break;
       }
+
     }
     switch (state[k].stage) {
       case 1: {
@@ -647,7 +657,8 @@ size_t agg_imv_q1(size_t begin, size_t end, Database& db,
 
         cur += VECTORSIZE;
         state[k].stage = 2;
-        hash_table->prefetchEntry(state[k].v_probe_hash);
+        if (stateNumSIMD > 1)
+          hash_table->prefetchEntry(state[k].v_probe_hash);
       }
         break;
       case 2: {
@@ -692,33 +703,35 @@ size_t agg_imv_q1(size_t begin, size_t end, Database& db,
 #else
         num = _mm_popcnt_u32(state[k].m_valid_probe);
         if (num == VECTORSIZE) {
-          v_prefetch(state[k].v_bucket_addrs);
+          if (stateNumSIMD > 1)
+            v_prefetch(state[k].v_bucket_addrs);
           state[k].stage = 0;
         } else {
           if ((done < imvNum)) {
-            num_temp = _mm_popcnt_u32(state[imvNum1].m_valid_probe);
+            num_temp = _mm_popcnt_u32(state[imvNum].m_valid_probe);
             if (num + num_temp < VECTORSIZE) {
               // compress imv_state[k]
               state[k].compress();
               // expand imv_state[k] -> imv_state[imvNum]
-              state[imvNum1].expand(state[k]);
-              state[imvNum1].m_valid_probe = mask[num + num_temp];
+              state[imvNum].expand(state[k]);
+              state[imvNum].m_valid_probe = mask[num + num_temp];
               state[k].m_valid_probe = 0;
               state[k].stage = 1;
-              state[imvNum1].stage = 0;
+              state[imvNum].stage = 0;
               --k;
               break;
             } else {
               // expand imv_state[imvNum] -> expand imv_state[k]
-              state[k].expand(state[imvNum1]);
-              state[imvNum1].m_valid_probe = _mm512_kand(state[imvNum1].m_valid_probe, _mm512_knot(mask[VECTORSIZE - num]));
+              state[k].expand(state[imvNum]);
+              state[imvNum].m_valid_probe = _mm512_kand(state[imvNum].m_valid_probe, _mm512_knot(mask[VECTORSIZE - num]));
               // compress imv_state[imvNum]
-              state[imvNum1].compress();
-              state[imvNum1].m_valid_probe = state[imvNum1].m_valid_probe >> (VECTORSIZE - num);
+              state[imvNum].compress();
+              state[imvNum].m_valid_probe = state[imvNum].m_valid_probe >> (VECTORSIZE - num);
               state[k].m_valid_probe = mask[VECTORSIZE];
               state[k].stage = 0;
-              state[imvNum1].stage = 0;
-              v_prefetch(state[k].v_bucket_addrs);
+              state[imvNum].stage = 0;
+              if (stateNumSIMD > 1)
+                v_prefetch(state[k].v_bucket_addrs);
             }
           }
         }
@@ -782,7 +795,8 @@ size_t agg_imv_q1(size_t begin, size_t end, Database& db,
 
         num = _mm_popcnt_u32(state[k].m_valid_probe);
         if (num == VECTORSIZE || done >= imvNum) {
-          v_prefetch(state[k].v_bucket_addrs);
+          if (stateNumSIMD > 1)
+            v_prefetch(state[k].v_bucket_addrs);
         } else {
           if ((done < imvNum)) {
             num_temp = _mm_popcnt_u32(state[imvNum].m_valid_probe);
@@ -807,7 +821,298 @@ size_t agg_imv_q1(size_t begin, size_t end, Database& db,
               state[k].m_valid_probe = mask[VECTORSIZE];
               state[k].stage = 0;
               state[imvNum].stage = 0;
-              v_prefetch(state[k].v_bucket_addrs);
+              if (stateNumSIMD > 1)
+                v_prefetch(state[k].v_bucket_addrs);
+            }
+          }
+        }
+
+      }
+        break;
+    }
+    ++k;
+  }
+
+  return found;
+}
+size_t agg_simd_q1(size_t begin, size_t end, Database& db,
+                   Hashmapx<types::Integer, tuple<Numeric<12, 2>, Numeric<12, 2>, Numeric<12, 4>, Numeric<12, 6>, int64_t>, hashFun, false>* hash_table,
+                   PartitionedDeque<PARTITION_SIZE>* partition, void** entry_addrs, void** results_entry) {
+  size_t found = 0, pos = 0, cur = begin;
+  int stateNumSIMD = 1;
+  int k = 0, done = 0, buildkey, probeKey, valid_size, imvNum = stateNumSIMD;
+  AggStateQ1 state[stateNumSIMD + 1];
+  hash_t probeHash;
+  types::Date c1 = types::Date::castString("1998-09-02");
+  types::Numeric<12, 2> one = types::Numeric<12, 2>::castString("1.00");
+  auto& li = db["lineitem"];
+  auto l_returnflag = li["l_returnflag"].data<types::Char<1>>();
+  auto l_linestatus = li["l_linestatus"].data<types::Char<1>>();
+  auto l_extendedprice = li["l_extendedprice"].data<types::Numeric<12, 2>>();
+  auto l_discount = li["l_discount"].data<types::Numeric<12, 2>>();
+  auto l_tax = li["l_tax"].data<types::Numeric<12, 2>>();
+  auto l_quantity = li["l_quantity"].data<types::Numeric<12, 2>>();
+  auto l_shipdate = li["l_shipdate"].data<types::Date>();
+  using group_t = Hashmapx<types::Integer, tuple<Numeric<12, 2>, Numeric<12, 2>,
+  Numeric<12, 4>, Numeric<12, 6>, int64_t>, hashFun, false>::Entry;
+  hash_t hash_value;
+  group_t* entry = nullptr, *old_entry = nullptr;
+  uint64_t* values, *values_old;
+
+  __m512i v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_zero = _mm512_set1_epi64(0), v_lzeros, v_63 = _mm512_set1_epi64(63);
+  __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(end - begin), v_seed = _mm512_set1_epi64(vectorwise::primitives::seed), v_all_ones =
+      _mm512_set1_epi64(-1), v_conflict, v_ht_keys, v_hash_mask, v_ht_value, v_next, v_one_num = _mm512_set1_epi64(one.value);
+  Vec8u u_new_addrs(uint64_t(0)), u_offset_hash(offsetof(group_t, h.hash)), u_offset_k(offsetof(group_t, k)), u_offset_v(offsetof(group_t, v)), u_8(uint64_t(8)), u_16(
+      uint64_t(16)), u_24(uint64_t(24)), u_32(uint64_t(32));
+  __mmask8 m_no_conflict, m_rest, m_match, m_to_insert, mask[VECTORSIZE + 1];
+  __m256i v256_zero = _mm256_set1_epi32(0), v256_probe_keys, v256_probe_value, v256_ht_keys;
+  uint8_t num, num_temp;
+  Vec8u u_keys(uint64_t(0));
+  for (int i = 0; i <= VECTORSIZE; ++i) {
+    mask[i] = (1 << i) - 1;
+  }
+
+  while (true) {
+    k = (k >= stateNumSIMD) ? 0 : k;
+    if ((cur >= end)) {
+      if (state[k].m_valid_probe == 0 && state[k].stage != 3) {
+        ++done;
+        state[k].stage = 3;
+        ++k;
+        continue;
+      }
+    }
+    if (done >= imvNum) {
+      if (state[imvNum].m_valid_probe > 0) {
+        k = imvNum;
+      } else {
+        break;
+      }
+
+    }
+    switch (state[k].stage) {
+      case 1: {
+        /// step 1: get offsets
+        state[k].v_probe_offset = _mm512_add_epi64(_mm512_set1_epi64(cur), v_base_offset);
+        state[k].m_valid_probe = -1;
+        if (cur + VECTORSIZE >= end) {
+          state[k].m_valid_probe = (state[k].m_valid_probe >> (cur + VECTORSIZE - end));
+        }
+        if (nullptr == entry_addrs) {
+          /// step 2: gather probe keys and values
+#if SEQ_PREFETCH
+          _mm_prefetch((((char* )(l_returnflag+cur))+PDIS), _MM_HINT_T0);
+          _mm_prefetch((((char* )(l_returnflag+cur))+PDIS+64), _MM_HINT_T0);
+          _mm_prefetch((((char* )(l_linestatus+cur))+PDIS), _MM_HINT_T0);
+          _mm_prefetch((((char* )(l_linestatus+cur))+PDIS+64), _MM_HINT_T0);
+          _mm_prefetch((((char* )(l_quantity+cur))+PDIS), _MM_HINT_T0);
+          _mm_prefetch((((char* )(l_quantity+cur))+PDIS+64), _MM_HINT_T0);
+          _mm_prefetch((((char* )(l_extendedprice+cur))+PDIS), _MM_HINT_T0);
+          _mm_prefetch((((char* )(l_extendedprice+cur))+PDIS+64), _MM_HINT_T0);
+          _mm_prefetch((((char* )(l_discount+cur))+PDIS), _MM_HINT_T0);
+          _mm_prefetch((((char* )(l_discount+cur))+PDIS+64), _MM_HINT_T0);
+          _mm_prefetch((((char* )(l_tax+cur))+PDIS), _MM_HINT_T0);
+          _mm_prefetch((((char* )(l_tax+cur))+PDIS+64), _MM_HINT_T0);
+#endif
+          for (int i = 0; (i < VECTORSIZE) && (cur + i < end); ++i) {
+            *(char*) (((char*) (&u_keys.entry[i])) + 0) = l_returnflag[cur + i].value;
+            *(char*) (((char*) (&u_keys.entry[i])) + 1) = l_linestatus[cur + i].value;
+          }
+          state[k].v_probe_keys = u_keys.reg;
+          state[k].v_probe_value[0] = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int* )l_quantity, 8);
+          state[k].v_probe_value[1] = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int* )l_extendedprice, 8);
+          state[k].v_probe_value[2] = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int* )l_discount, 8);
+          state[k].v_probe_value[2] = _mm512_mullo_epi64(state[k].v_probe_value[1], _mm512_sub_epi64(v_one_num, state[k].v_probe_value[2]));
+          state[k].v_probe_value[3] = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int* )l_tax, 8);
+          state[k].v_probe_value[3] = _mm512_mullo_epi64(state[k].v_probe_value[2], _mm512_add_epi64(v_one_num, state[k].v_probe_value[3]));
+          state[k].v_probe_value[4] = v_one;
+          /// step 3: compute hash values
+          state[k].v_probe_hash = runtime::MurMurHash()((state[k].v_probe_keys), (v_seed));
+        } else {
+#if SEQ_PREFETCH
+          _mm_prefetch((((char* )(entry_addrs[cur+PDISD]))), _MM_HINT_T0);
+          _mm_prefetch((((char* )(entry_addrs[cur+PDISD]))+64), _MM_HINT_T0);
+#endif
+          // gather the addresses of entries
+          state[k].v_probe_offset = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset, (const long long int * )entry_addrs, 8);
+          v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid_probe, state[k].v_probe_offset + u_offset_k, nullptr, 1);
+          state[k].v_probe_keys = _mm512_cvtepi32_epi64(v256_probe_keys);
+          state[k].v_probe_hash = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset+u_offset_hash, nullptr, 1);
+          state[k].v_probe_value[0] = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset+u_offset_v, nullptr, 1);
+          state[k].v_probe_value[1] = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset+u_offset_v+u_8, nullptr, 1);
+          state[k].v_probe_value[2] = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset+u_offset_v+u_16, nullptr, 1);
+          state[k].v_probe_value[3] = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset+u_offset_v+u_24, nullptr, 1);
+          state[k].v_probe_value[4] = _mm512_mask_i64gather_epi64(v_zero, state[k].m_valid_probe, state[k].v_probe_offset+u_offset_v+u_32, nullptr, 1);
+        }
+
+        cur += VECTORSIZE;
+//        state[k].stage = 2;
+//        if (stateNumSIMD > 1)
+//          hash_table->prefetchEntry(state[k].v_probe_hash);
+//      }
+//        break;
+//      case 2: {
+
+        mergeKeys(state[k]);
+        /// step 4: find the addresses of corresponding buckets for new probes
+        Vec8uM v_new_bucket_addrs = hash_table->find_chain(state[k].v_probe_hash);
+
+        /// insert new nodes in the corresponding hash buckets
+        m_to_insert = _mm512_kandn(v_new_bucket_addrs.mask, state[k].m_valid_probe);
+        v_hash_mask = ((Vec8u(state[k].v_probe_hash) & Vec8u(hash_table->mask)));
+        v_hash_mask = _mm512_mask_blend_epi64(state[k].m_valid_probe, v_all_ones, v_hash_mask);
+        v_conflict = _mm512_conflict_epi64(v_hash_mask);
+        m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
+        m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
+        if (m_no_conflict) {
+          if (nullptr == entry_addrs) {
+            insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
+            // insert the new addresses to the hash table
+            _mm512_mask_i64scatter_epi64((long long int* )hash_table->entries, m_no_conflict, v_hash_mask, u_new_addrs.reg, 8);
+          } else {
+            // set the next of entries = 0
+            _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset, v_zero, 1);
+            // must write back the merged values!!!!!!!!!
+            _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset+u_offset_v, state[k].v_probe_value[0], 1);
+            _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset+u_offset_v + u_8, state[k].v_probe_value[1], 1);
+            _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset+u_offset_v + u_16, state[k].v_probe_value[2], 1);
+            _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset+u_offset_v + u_24, state[k].v_probe_value[3], 1);
+            _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset+u_offset_v + u_32, state[k].v_probe_value[4], 1);
+
+            _mm512_mask_i64scatter_epi64((long long int* )hash_table->entries, m_no_conflict, v_hash_mask, state[k].v_probe_offset, 8);
+            _mm512_mask_compressstoreu_epi64((results_entry + found), m_no_conflict, state[k].v_probe_offset);
+          }
+          found += _mm_popcnt_u32(m_no_conflict);
+          // get rid of no-conflict elements
+          state[k].m_valid_probe = _mm512_kandn(m_no_conflict, state[k].m_valid_probe);
+        }
+        state[k].v_bucket_addrs = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_valid_probe, v_hash_mask, (const long long int* )hash_table->entries, 8);
+#if 0
+        v_prefetch(state[k].v_bucket_addrs);
+        state[k].stage = 0;
+#else
+        num = _mm_popcnt_u32(state[k].m_valid_probe);
+        if (num == VECTORSIZE) {
+//          if (stateNumSIMD > 1)
+//            v_prefetch(state[k].v_bucket_addrs);
+          state[k].stage = 0;
+        } else {
+          if ((done < imvNum)) {
+            num_temp = _mm_popcnt_u32(state[imvNum].m_valid_probe);
+            if (num + num_temp < VECTORSIZE) {
+              // compress imv_state[k]
+              state[k].compress();
+              // expand imv_state[k] -> imv_state[imvNum]
+              state[imvNum].expand(state[k]);
+              state[imvNum].m_valid_probe = mask[num + num_temp];
+              state[k].m_valid_probe = 0;
+              state[k].stage = 1;
+              state[imvNum].stage = 0;
+              --k;
+              break;
+            } else {
+              // expand imv_state[imvNum] -> expand imv_state[k]
+              state[k].expand(state[imvNum]);
+              state[imvNum].m_valid_probe = _mm512_kand(state[imvNum].m_valid_probe, _mm512_knot(mask[VECTORSIZE - num]));
+              // compress imv_state[imvNum]
+              state[imvNum].compress();
+              state[imvNum].m_valid_probe = state[imvNum].m_valid_probe >> (VECTORSIZE - num);
+              state[k].m_valid_probe = mask[VECTORSIZE];
+              state[k].stage = 0;
+              state[imvNum].stage = 0;
+//              if (stateNumSIMD > 1)
+//                v_prefetch(state[k].v_bucket_addrs);
+            }
+          }
+        }
+#endif
+      }
+        break;
+      case 0: {
+        /// step 5: gather the all new build keys
+        v256_ht_keys = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid_probe, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_k.reg), nullptr, 1);
+        v_ht_keys = _mm512_cvtepi32_epi64(v256_ht_keys);
+        /// step 6: compare the probe keys and build keys and write points
+        m_match = _mm512_cmpeq_epi64_mask(state[k].v_probe_keys, v_ht_keys);
+        m_match = _mm512_kand(m_match, state[k].m_valid_probe);
+
+        /// update the aggregators
+        v_conflict = _mm512_conflict_epi64(state[k].v_bucket_addrs);
+        m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
+        m_no_conflict = _mm512_kand(m_no_conflict, m_match);
+
+        v_ht_value = _mm512_mask_i64gather_epi64(v_zero, m_no_conflict, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg), nullptr, 1);
+        _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg), _mm512_add_epi64(state[k].v_probe_value[0], v_ht_value), 1);
+        v_ht_value = _mm512_mask_i64gather_epi64(v_zero, m_no_conflict, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg) + u_8, nullptr, 1);
+        _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg) + u_8, _mm512_add_epi64(state[k].v_probe_value[1], v_ht_value), 1);
+        v_ht_value = _mm512_mask_i64gather_epi64(v_zero, m_no_conflict, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg) + u_16, nullptr, 1);
+        _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg)+ u_16, _mm512_add_epi64(state[k].v_probe_value[2], v_ht_value), 1);
+        v_ht_value = _mm512_mask_i64gather_epi64(v_zero, m_no_conflict, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg) + u_24, nullptr, 1);
+        _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg)+ u_24, _mm512_add_epi64(state[k].v_probe_value[3], v_ht_value), 1);
+        v_ht_value = _mm512_mask_i64gather_epi64(v_zero, m_no_conflict, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg) + u_32, nullptr, 1);
+        _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].v_bucket_addrs, u_offset_v.reg)+ u_32, _mm512_add_epi64(state[k].v_probe_value[4], v_ht_value), 1);
+
+        state[k].m_valid_probe = _mm512_kandn(m_no_conflict, state[k].m_valid_probe);
+        // the remaining matches, DO NOT get next
+        m_match = _mm512_kandn(m_no_conflict, m_match);
+
+        /// step 7: NOT found, then insert
+        v_next = _mm512_mask_i64gather_epi64(v_all_ones, _mm512_kandn(m_match, state[k].m_valid_probe), state[k].v_bucket_addrs, nullptr, 1);
+        m_to_insert = _mm512_kand(_mm512_kandn(m_match, state[k].m_valid_probe), _mm512_cmpeq_epi64_mask(v_next, v_zero));
+        // get rid of bucket address of matched probes
+        v_next = _mm512_mask_blend_epi64(_mm512_kandn(m_match, state[k].m_valid_probe), v_all_ones, state[k].v_bucket_addrs);
+        v_conflict = _mm512_conflict_epi64(v_next);
+        m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
+        m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
+        if (m_no_conflict) {
+          if (nullptr == entry_addrs) {
+            insertNewEntry(state[k], u_new_addrs, m_no_conflict, partition, u_offset_hash.reg, u_offset_k.reg, u_offset_v.reg);
+            // insert the new addresses to the hash table
+            _mm512_mask_i64scatter_epi64(0, m_no_conflict, state[k].v_bucket_addrs, u_new_addrs.reg, 1);
+          } else {
+            // set the next of entries = 0
+            _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_probe_offset, v_zero, 1);
+            _mm512_mask_i64scatter_epi64(nullptr, m_no_conflict, state[k].v_bucket_addrs, state[k].v_probe_offset, 1);
+            _mm512_mask_compressstoreu_epi64((results_entry + found), m_no_conflict, state[k].v_probe_offset);
+          }
+          found += _mm_popcnt_u32(m_no_conflict);
+
+          state[k].m_valid_probe = _mm512_kandn(m_no_conflict, state[k].m_valid_probe);
+        }
+        v_next = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_valid_probe, state[k].v_bucket_addrs, nullptr, 1);
+        // the remaining matches, DO NOT get next
+        state[k].v_bucket_addrs = _mm512_mask_blend_epi64(m_match, v_next, state[k].v_bucket_addrs);
+
+        num = _mm_popcnt_u32(state[k].m_valid_probe);
+        if (num == VECTORSIZE || done >= imvNum) {
+//          if (stateNumSIMD > 1)
+//            v_prefetch(state[k].v_bucket_addrs);
+        } else {
+          if ((done < imvNum)) {
+            num_temp = _mm_popcnt_u32(state[imvNum].m_valid_probe);
+            if (num + num_temp < VECTORSIZE) {
+              // compress imv_state[k]
+              state[k].compress();
+              // expand imv_state[k] -> imv_state[imvNum]
+              state[imvNum].expand(state[k]);
+              state[imvNum].m_valid_probe = mask[num + num_temp];
+              state[k].m_valid_probe = 0;
+              state[k].stage = 1;
+              state[imvNum].stage = 0;
+              --k;
+              break;
+            } else {
+              // expand imv_state[imvNum] -> expand imv_state[k]
+              state[k].expand(state[imvNum]);
+              state[imvNum].m_valid_probe = _mm512_kand(state[imvNum].m_valid_probe, _mm512_knot(mask[VECTORSIZE - num]));
+              // compress imv_state[imvNum]
+              state[imvNum].compress();
+              state[imvNum].m_valid_probe = state[imvNum].m_valid_probe >> (VECTORSIZE - num);
+              state[k].m_valid_probe = mask[VECTORSIZE];
+              state[k].stage = 0;
+              state[imvNum].stage = 0;
+//              if (stateNumSIMD > 1)
+//                v_prefetch(state[k].v_bucket_addrs);
             }
           }
         }
