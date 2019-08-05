@@ -1325,46 +1325,215 @@ pos_t Hashjoin::joinBoncz() {
    contCon.followupWrite = followupWrite;
    return 0;
 }
+struct __attribute__((aligned(64))) BuildSIMDState {
+  __m512i v_entry_addr;
+  __m512i v_hash_value;
+  __m512i v_build_key;
+  __mmask8 m_valid;
+  uint8_t valid_size, stage,mask[VECTORSIZE+1];
+  BuildSIMDState()
+      : v_entry_addr(_mm512_set1_epi64(0)),
+        v_hash_value(_mm512_set1_epi64(0)),
+        valid_size(VECTORSIZE),
+        stage(1),
+        m_valid(0){
+    for (int i = 0; i <= VECTORSIZE; ++i) {
+      mask[i] = (1 << i) - 1;
+    }
+  }
+  inline void reset() {
+    v_entry_addr = _mm512_set1_epi64(0);
+    v_hash_value = _mm512_set1_epi64(0);
+    valid_size = VECTORSIZE;
+    stage = 1;
+    m_valid=0;
+  }
+  void* operator new(size_t size) {
+    return memalign(64, size);
+  }
+  void operator delete(void* mem) {
+    return free(mem);
+  }
+  void* operator new[](size_t size) {
+    return memalign(64, size);
+  }
+  void operator delete[](void* mem) {
+    return free(mem);
+  }
+  inline void compress() {
+    v_entry_addr = _mm512_maskz_compress_epi64(m_valid, v_entry_addr);
+    v_hash_value = _mm512_maskz_compress_epi64(m_valid, v_hash_value);
+    v_build_key = _mm512_maskz_compress_epi64(m_valid, v_build_key);
+  }
+  inline void expand(BuildSIMDState& src_state) {
+    v_entry_addr = _mm512_mask_expand_epi64(v_entry_addr, _mm512_knot(m_valid), src_state.v_entry_addr);
+    v_hash_value = _mm512_mask_expand_epi64(v_hash_value, _mm512_knot(m_valid), src_state.v_hash_value);
+    v_build_key = _mm512_mask_expand_epi64(v_build_key, _mm512_knot(m_valid), src_state.v_build_key);
+
+
+  }
+  inline void compact(BuildSIMDState& RVS, uint8_t done, uint8_t imvNum,uint8_t& k,uint8_t next_stage,uint8_t src_stage){
+   auto num = _mm_popcnt_u32(m_valid);
+    if (num == VECTORSIZE || done >= imvNum) {
+      stage = next_stage;
+    } else {
+       auto num_temp = _mm_popcnt_u32(RVS.m_valid);
+        if (num + num_temp < VECTORSIZE) {
+          // compress imv_state[k]
+          compress();
+          // expand imv_state[k] -> imv_state[imvNum1]
+          RVS.expand(*this);
+          RVS.m_valid = mask[num + num_temp];
+          m_valid = 0;
+          stage = src_stage;
+          RVS.stage = next_stage;
+          --k;
+        } else {
+          // expand imv_state[imvNum1] -> expand imv_state[k]
+          expand(RVS);
+          RVS.m_valid = _mm512_kand(RVS.m_valid, _mm512_knot(mask[VECTORSIZE - num]));
+          // compress imv_state[imvNum]
+          RVS.compress();
+          RVS.m_valid = RVS.m_valid >> (VECTORSIZE - num);
+          m_valid = mask[VECTORSIZE];
+          RVS.stage = next_stage;
+          stage = next_stage;
+        }
+    }
+  }
+};
+static int stateNumSIMD=vectorwise::Hashjoin::imvNum;
+size_t HashBuild(size_t begin, size_t end, uint32_t* buildKey, runtime::Hashmap* hash_table, runtime::Allocator*allo, int entry_size, uint32_t* pos_buff) {
+  size_t found = 0, cur = begin;
+  uint8_t valid_size = VECTORSIZE, done = 0, k = 0;
+
+  int build_key_off = sizeof(runtime::Hashmap::EntryHeader);
+  __m512i v_build_key, v_offset, v_base_entry_off, v_key_off = _mm512_set1_epi64(build_key_off), v_build_hash_mask, v_zero = _mm512_set1_epi64(0), v_all_ones = _mm512_set1_epi64(
+      -1), v_conflict, v_base_offset = _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0), v_seed = _mm512_set1_epi64(primitives::seed), v_offset_upper = _mm512_set1_epi64(end);
+
+  __mmask8 m_no_conflict, m_rest;
+  __m256i v256_zero = _mm256_set1_epi32(0), v256_build_key;
+  v_base_entry_off = _mm512_mullo_epi64(v_base_offset, _mm512_set1_epi64(entry_size));
+  uint64_t* hash_value = nullptr;
+  BuildSIMDState state[stateNumSIMD];
+  while (done < stateNumSIMD) {
+    k = (k >= stateNumSIMD) ? 0 : k;
+    if (cur >= end) {
+      if (state[k].m_valid == 0 && state[k].stage != 3) {
+        ++done;
+        state[k].stage = 3;
+        ++k;
+        continue;
+      }
+    }
+    switch (state[k].stage) {
+      case 1: {
+        /// step 1: gather build keys (using gather to compilate with loading discontinuous values)
+        v_offset = _mm512_add_epi64(_mm512_set1_epi64(cur), v_base_offset);
+        state[k].m_valid = _mm512_cmpgt_epu64_mask(v_offset_upper, v_offset);
+        if (pos_buff) {
+          v_offset = _mm512_cvtepi32_epi64(_mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid, v_offset, (const int* )pos_buff, 4));
+        }
+        v256_build_key = _mm512_mask_i64gather_epi32(v256_zero, state[k].m_valid, v_offset, (const int* )buildKey, 4);
+        v_build_key = _mm512_cvtepi32_epi64(v256_build_key);
+        cur += VECTORSIZE;
+
+        /// step 2: allocate new entries
+        runtime::Hashmap::EntryHeader* ptr = (runtime::Hashmap::EntryHeader*) allo->allocate(VECTORSIZE * entry_size);
+
+        /// step 3: write build keys to new entries
+        state[k].v_entry_addr = _mm512_add_epi64(_mm512_set1_epi64((uint64_t) ptr), v_base_entry_off);
+        _mm512_i64scatter_epi64(0, _mm512_add_epi64(state[k].v_entry_addr, v_key_off), v_build_key, 1);
+
+        /// step 4: hashing the build keys (note the hash value cannot be used to directly fetch buckets)
+        state[k].v_hash_value = runtime::MurMurHash()(v_build_key, v_seed);
+        state[k].stage = 0;
+
+        hash_table->prefetchEntry(state[k].v_hash_value);
+      }
+        break;
+      case 0: {
+        /// scalar codes due to writhe conflicts among multi-threads
+        hash_table->insert_tagged_sel((Vec8u*) (&state[k].v_entry_addr), (Vec8u*) (&state[k].v_hash_value), state[k].m_valid);
+        found += _mm_popcnt_u32(state[k].m_valid);
+        state[k].stage = 1;
+        state[k].m_valid = 0;
+      }
+        break;
+    }
+    ++k;
+  }
+
+  return found;
+}
 
 size_t Hashjoin::next() {
    using runtime::Hashmap;
    // --- build
    if (!consumed) {
       size_t found = 0;
+
+    if (join == &vectorwise::Hashjoin::joinSIMDAMAC || join == &vectorwise::Hashjoin::joinIMV || join == &vectorwise::Hashjoin::joinSelIMV) {
+      barrier([&]() {
+        if (!shared.sizeIsSet.load()) {
+          shared.sizeIsSet.store(false);
+          if (shared.ht.capacity < ht_size) {
+            shared.ht.setSize(ht_size);
+//            std::cout<<"set size "<<ht_size<<std::endl;
+          }
+        }
+
+      });
+
+      for (auto n = left->next(); n != EndOfStream; n = left->next()) {
+        found += n;
+        uint32_t* buildKeys = (reinterpret_cast<int*>(((F3_Op *) (buildHash.ops[0].get()))->param2));
+        pos_t * sel = (reinterpret_cast<int*>(((F3_Op *) (buildHash.ops[0].get()))->outputSelectionV));
+        HashBuild(0, n, buildKeys, &shared.ht, &runtime::this_worker->allocator, ht_entry_size, sel);
+      }
+      shared.found.fetch_add(found);
+      auto globalFound = shared.found.load();
+      if (globalFound == 0) {
+        consumed = true;
+        return EndOfStream;
+      }
+    } else {
       // --- build phase 1: materialize ht entries
       for (auto n = left->next(); n != EndOfStream; n = left->next()) {
-         found += n;
-         // build hashes
-         buildHash.evaluate(n);
-         // scatter hash, keys and values into ht entries
-         auto alloc =
-             runtime::this_worker->allocator.allocate(n * ht_entry_size);
-         if (!alloc) throw std::runtime_error("malloc failed");
-         allocations.push_back(std::make_pair(alloc, n));
-         scatterStart = reinterpret_cast<decltype(scatterStart)>(alloc);
-         buildScatter.evaluate(n);
+        found += n;
+        // build hashes
+        buildHash.evaluate(n);
+        // scatter hash, keys and values into ht entries
+        auto alloc = runtime::this_worker->allocator.allocate(n * ht_entry_size);
+        if (!alloc)
+          throw std::runtime_error("malloc failed");
+        allocations.push_back(std::make_pair(alloc, n));
+        scatterStart = reinterpret_cast<decltype(scatterStart)>(alloc);
+        buildScatter.evaluate(n);
       }
 
       // --- build phase 2: insert ht entries
       shared.found.fetch_add(found);
       barrier([&]() {
-         auto globalFound = shared.found.load();
-         if (globalFound) shared.ht.setSize(globalFound);
+        auto globalFound = shared.found.load();
+        if (globalFound) shared.ht.setSize(globalFound);
       });
       auto globalFound = shared.found.load();
       if (globalFound == 0) {
-         consumed = true;
-         return EndOfStream;
+        consumed = true;
+        return EndOfStream;
       }
       insertAllEntries(allocations, shared.ht, ht_entry_size);
-      consumed = true;
-      barrier(); // wait for all threads to finish build phase
-      runtime::this_worker->log_time("build");
-   }
+    }
+
+    consumed = true;
+    barrier();  // wait for all threads to finish build phase
+    runtime::this_worker->log_time("build");
 //   if(!shared.printed.load()) {
-// //    shared.printed.store(true);
-//  // shared.ht.printSta();
+//     shared.printed.store(true);
+//   shared.ht.printStaTag();
 //   }
+  }
    // --- lookup
    if(join == &vectorwise::Hashjoin::joinRow) {
      while (true) {

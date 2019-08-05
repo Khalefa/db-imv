@@ -445,7 +445,7 @@ std::unique_ptr<Q3Builder::Q3> Q3Builder::getQuery() {
   HashJoin(Buffer(cust_ord, sizeof(pos_t)), vectorJoinFun)  //
       .setProbeSelVector(Buffer(sel_cust), vectorJoinFun).addBuildKey(Column(order, "o_orderkey"), Buffer(sel_order), conf.hash_sel_int32_t_col(),
                                                                       primitives::scatter_sel_int32_t_col)  //
-      .addProbeKey(Column(lineitem, "l_orderkey"), Buffer(sel_cust), conf.hash_sel_int32_t_col(), primitives::keys_equal_int32_t_col);
+      .addProbeKey(Column(lineitem, "l_orderkey"), Buffer(sel_cust), conf.hash_sel_int32_t_col(), primitives::keys_equal_int32_t_col).setHTsize(ht_date_size);
 
 // count(*)
   FixedAggregation(Expression().addOp(primitives::aggr_static_count_star, Value(&r->count)));

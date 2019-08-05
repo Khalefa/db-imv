@@ -81,6 +81,7 @@ class QueryBuilder {
       setProbeSelVector(DS vec,
                         pos_t (Hashjoin::*join)() = &Hashjoin::joinSelParallel);
       B& pushProbeSelVector(DS sel, DS target);
+      B& setHTsize(size_t size);
    };
 
    struct HashGroupBuilder {
@@ -164,6 +165,7 @@ class QueryBuilder {
    HashJoinBuilder
    HashJoin(DS probeMatches,
             pos_t (Hashjoin::*join)() = &Hashjoin::joinAllParallel);
+
    HashGroupBuilder HashGroup();
 
    ~QueryBuilder();

@@ -435,6 +435,12 @@ QueryBuilder::HashJoinBuilder::pushProbeSelVector(DS sel, DS target) {
    join->keyEquality.ops.push_back(move(lookup.expression->ops.back()));
    return *this;
 }
+QueryBuilder::HashJoinBuilder&
+QueryBuilder::HashJoinBuilder::setHTsize(size_t size) {
+    join->ht_size = size;
+
+   return *this;
+}
 
 QueryBuilder::HashGroupBuilder::HashGroupBuilder(QueryBuilder& b) : base(b) {}
 

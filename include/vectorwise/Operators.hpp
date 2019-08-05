@@ -303,6 +303,7 @@ class Hashjoin : public BinaryOperator {
    Hashjoin(Shared& sm);
    pos_t batchSize;
    size_t ht_entry_size;
+   size_t ht_size;
    Expression buildHash;
    Aggregates buildScatter;
    runtime::Hashmap::EntryHeader* scatterStart;
