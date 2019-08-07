@@ -144,7 +144,7 @@ int64_t search_tree_AMAC(tree_t *tree, relation_t *rel, void *output) {
   return matches;
 }
 volatile static char g_lock = 0, g_lock_morse = 0;
-volatile static uint64_t total_num = 0, global_curse = 0, global_upper;
+volatile static uint64_t total_num = 0, global_curse = 0, global_upper,global_morse_size;
 typedef int64_t (*BTSFun)(tree_t *tree, relation_t *rel, void *output);
 volatile static struct Fun {
   BTSFun fun_ptr;
@@ -161,12 +161,12 @@ void morse_driven(void*param, BTSFun fun, void*output) {
   while (1) {
     lock(&g_lock_morse);
     base = global_curse;
-    global_curse += MORSE_SIZE;
+    global_curse += global_morse_size;
     unlock(&g_lock_morse);
     if (base >= global_upper) {
       break;
     }
-    num = (global_upper - base) < MORSE_SIZE ? (global_upper - base) : MORSE_SIZE;
+    num = (global_upper - base) < global_morse_size ? (global_upper - base) : global_morse_size;
     relS.tuples = args->relS.tuples + base;
     relS.num_tuples = num;
     args->num_results += fun(args->tree, &relS, output);
@@ -220,19 +220,19 @@ void *bts_thread(void *param) {
   BARRIER_ARRIVE(args->barrier, rv);
 
   if (args->tid == 0) {
-    strcpy(pfun[0].fun_name, "IMV");
-    strcpy(pfun[1].fun_name, "AMAC");
-    strcpy(pfun[2].fun_name, "FVA");
-    strcpy(pfun[3].fun_name, "DVA");
-    strcpy(pfun[4].fun_name, "SIMD");
-    strcpy(pfun[5].fun_name, "Naive");
+    strcpy(pfun[5].fun_name, "IMV");
+    strcpy(pfun[4].fun_name, "AMAC");
+    strcpy(pfun[3].fun_name, "FVA");
+    strcpy(pfun[2].fun_name, "DVA");
+    strcpy(pfun[1].fun_name, "SIMD");
+    strcpy(pfun[0].fun_name, "Naive");
 
-    pfun[0].fun_ptr = bts_smv;
-    pfun[1].fun_ptr = search_tree_AMAC;
-    pfun[2].fun_ptr = bts_simd_amac;
-    pfun[3].fun_ptr = bts_simd_amac_raw;
-    pfun[4].fun_ptr = bts_simd;
-    pfun[5].fun_ptr = search_tree_raw;
+    pfun[5].fun_ptr = bts_smv;
+    pfun[4].fun_ptr = search_tree_AMAC;
+    pfun[3].fun_ptr = bts_simd_amac;
+    pfun[2].fun_ptr = bts_simd_amac_raw;
+    pfun[1].fun_ptr = bts_simd;
+    pfun[0].fun_ptr = search_tree_raw;
 
     pf_num = 6;
   }
@@ -262,7 +262,7 @@ void *bts_thread(void *param) {
         gettimeofday(&t2, NULL);
         printf("total result num = %lld\t", total_num);
         deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-        printf("---- %5s bts costs time (ms) = %10.4lf , tid = %3d\n", pfun[fid].fun_name, deltaT * 1.0 / 1000, args->tid);
+        printf("---- %5s bts costs time (ms) = %10.4lf\n", pfun[fid].fun_name, deltaT * 1.0 / 1000);
         total_num = 0;
         global_curse = 0;
 
@@ -400,7 +400,11 @@ result_t *BTS(relation_t *relR, relation_t *relS, int nthreads) {
 #endif
   global_curse = 0;
   global_upper = relS->num_tuples;
-
+  if(nthreads==1){
+    global_morse_size= relS->num_tuples;
+  }else{
+    global_morse_size = MORSE_SIZE;
+  }
   uint32_t nbuckets = (relR->num_tuples / BUCKET_SIZE);
   tree_t *tree = (tree_t *)malloc(sizeof(tree_t));
   tree->buffer = NULL;

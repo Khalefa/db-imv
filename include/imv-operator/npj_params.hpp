@@ -29,7 +29,7 @@
 
 /** Pre-allocation size for overflow buffers */
 #ifndef OVERFLOW_BUF_SIZE
-#define OVERFLOW_BUF_SIZE (PAGE_SIZE >> 5)  // sizeof(bucket_t) = 2^5
+#define OVERFLOW_BUF_SIZE (1 << 25)//(PAGE_SIZE >> 5)  // sizeof(bucket_t) = 2^5
 #endif
 
 /** Should hashtable buckets be padded to cache line size */

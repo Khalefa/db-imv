@@ -213,6 +213,7 @@ int64_t probe_simd_amac(hashtable_t *ht, relation_t *rel, void *output) {
         v_write_index = _mm512_add_epi64(v_write_index, v_word_size);
         _mm512_mask_i64scatter_epi64((void * )join_res, m_match, v_write_index, v_right_payload, 1);
         // return back every time
+#if 0
         if (m_full == state[k].m_have_tuple) {
           ht_pos = (uint64_t *) &state[k].ht_off;
           for (int i = 0; i < VECTOR_SCALE; ++i) {
@@ -222,6 +223,10 @@ int64_t probe_simd_amac(hashtable_t *ht, relation_t *rel, void *output) {
           state[k].stage = 1;
           --k;
         }
+#else
+        state[k].stage = 1;
+        --k;
+#endif
       }
         break;
     }

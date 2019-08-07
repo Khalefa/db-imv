@@ -2,6 +2,8 @@
 
 #include <map>
 using namespace std;
+
+#define SERIAL_BUILD 1
 int64_t build_raw(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) {
   uint64_t found = 0;
   uint32_t i;
@@ -67,7 +69,6 @@ int64_t build_AMAC(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowb
         state[k].payload = rel->tuples[cur].payload;
         ++cur;
         _mm_prefetch((char * )(state[k].b), _MM_HINT_T0);
-        _mm_prefetch((char * )(state[k].b) + 64, _MM_HINT_T0);
 
       }
         break;
@@ -100,25 +101,25 @@ int64_t build_AMAC(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowb
 #define WORDSIZE 8
 size_t build_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) {
   int32_t found = 0, k = 0, done = 0, num, num_temp;
-  __attribute__((aligned(64)))      __mmask8 to_scatt = 0, m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict;
+  __attribute__((aligned(64)))        __mmask8 to_scatt = 0, m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict;
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(rel->num_tuples * sizeof(tuple_t)), v_base_offset, v_ht_cell, v_factor = _mm512_set1_epi64(
       ht->hash_mask), v_shift = _mm512_set1_epi64(ht->skip_bits), v_cell_hash, v_neg_one512 = _mm512_set1_epi64(-1), v_zero512 = _mm512_set1_epi64(0), v_write_index =
       _mm512_set1_epi64(0), v_ht_addr = _mm512_set1_epi64((uint64_t) ht->buckets), v_word_size = _mm512_set1_epi64(WORDSIZE), v_tuple_size = _mm512_set1_epi64(sizeof(tuple_t)),
-      v_bucket_size = _mm512_set1_epi64(sizeof(bucket_t)), v_next_off = _mm512_set1_epi64(offsetof(bucket_t, next)), v_right_payload, v_addr, v_all_ones =
-          _mm512_set1_epi64(-1), v_conflict, v_one = _mm512_set1_epi64(1), v_new_bucket, v_next, v_63 = _mm512_set1_epi64(63), v_key_off = _mm512_set1_epi64(
-          offsetof(bucket_t, tuples[0].key)),v_lzeros, v_previous, v_payload_off = _mm512_set1_epi64(offsetof(bucket_t, tuples[0].payload)), v_count_off = _mm512_set1_epi64(offsetof(bucket_t, count));
+      v_bucket_size = _mm512_set1_epi64(sizeof(bucket_t)), v_next_off = _mm512_set1_epi64(offsetof(bucket_t, next)), v_right_payload, v_addr, v_all_ones = _mm512_set1_epi64(-1),
+      v_conflict, v_one = _mm512_set1_epi64(1), v_new_bucket, v_next, v_63 = _mm512_set1_epi64(63), v_key_off = _mm512_set1_epi64(offsetof(bucket_t, tuples[0].key)), v_lzeros,
+      v_previous, v_payload_off = _mm512_set1_epi64(offsetof(bucket_t, tuples[0].payload)), v_count_off = _mm512_set1_epi64(offsetof(bucket_t, count));
   __m256i v256_one = _mm256_set1_epi32(1);
   tuple_t *join_res = NULL;
   uint64_t *pos = NULL, *new_bucket = (uint64_t*) &v_new_bucket;
   bucket_t * bucket;
   int tail_add = 0;
-  __attribute__((aligned(64)))   uint64_t cur_offset = 0, base_off[16], *ht_pos;
+  __attribute__((aligned(64)))     uint64_t cur_offset = 0, base_off[16], *ht_pos;
   for (int i = 0; i <= VECTOR_SCALE; ++i) {
     base_off[i] = i * sizeof(tuple_t);
     mask[i] = (1 << i) - 1;
   }
   v_base_offset = _mm512_load_epi64(base_off);
-  __attribute__((aligned(64)))    StateSIMD state[SIMDStateSize + 1];
+  __attribute__((aligned(64)))      StateSIMD state[SIMDStateSize + 1];
   // init # of the state
   for (int i = 0; i <= SIMDStateSize; ++i) {
     state[i].stage = 1;
@@ -262,6 +263,25 @@ size_t build_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (true) {
+#if SERIAL_BUILD
+          for (int i = 0; i < VECTOR_SCALE; ++i) {
+            new_bucket[i] = 0;
+            if (m_no_conflict & (1 << i)) {
+              get_new_bucket(&bucket, overflowbuf);
+              new_bucket[i] = bucket;
+            }
+          }
+          v_next = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_have_tuple, _mm512_add_epi64(state[k].ht_off, v_next_off), 0, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_key_off), state[k].key, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_payload_off), state[k].payload, 1);
+//          _mm512_mask_i64scatter_epi32(0, m_no_conflict, (v_new_bucket), v256_one, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_next_off), v_next, 1);
+
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].ht_off, v_next_off), v_new_bucket, 1);
+
+          found += _mm_popcnt_u32(m_no_conflict);
+          state[k].m_have_tuple = _mm512_kandn(m_no_conflict, state[k].m_have_tuple);
+#else
           for (int i = 0; i < VECTOR_SCALE; ++i) {
             new_bucket[i] = 0;
             if (m_to_insert & (1 << i)) {
@@ -275,7 +295,7 @@ size_t build_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
 //          _mm512_mask_i64scatter_epi32(0, m_to_insert, (v_new_bucket), v256_one, 1);
           _mm512_mask_i64scatter_epi64(0, m_to_insert, _mm512_add_epi64(v_new_bucket, v_next_off), v_next, 1);
 
-          // conflict-free insert
+          // conflict-solved insert
           v_lzeros = _mm512_lzcnt_epi64(v_conflict);
           v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
           to_scatt = _mm512_kandn(m_no_conflict, m_to_insert);
@@ -284,8 +304,8 @@ size_t build_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
 
           _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].ht_off, v_next_off), v_new_bucket, 1);
           found += _mm_popcnt_u32(m_to_insert);
-
           state[k].m_have_tuple = _mm512_kandn(m_to_insert, state[k].m_have_tuple);
+#endif
         }
 
         num = _mm_popcnt_u32(state[k].m_have_tuple);
@@ -363,25 +383,25 @@ size_t build_imv(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
 
 size_t build_DVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) {
   int32_t found = 0, k = 0, done = 0, num, num_temp;
-  __attribute__((aligned(64)))   __mmask8 to_scatt=0, m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict;
+  __attribute__((aligned(64)))     __mmask8 to_scatt = 0, m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict;
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(rel->num_tuples * sizeof(tuple_t)), v_base_offset, v_ht_cell, v_factor = _mm512_set1_epi64(
       ht->hash_mask), v_shift = _mm512_set1_epi64(ht->skip_bits), v_cell_hash, v_neg_one512 = _mm512_set1_epi64(-1), v_zero512 = _mm512_set1_epi64(0), v_write_index =
       _mm512_set1_epi64(0), v_ht_addr = _mm512_set1_epi64((uint64_t) ht->buckets), v_word_size = _mm512_set1_epi64(WORDSIZE), v_tuple_size = _mm512_set1_epi64(sizeof(tuple_t)),
-      v_bucket_size = _mm512_set1_epi64(sizeof(bucket_t)), v_next_off = _mm512_set1_epi64(offsetof(bucket_t, next)), v_right_payload, v_addr,
-      v_all_ones = _mm512_set1_epi64(-1), v_conflict, v_one = _mm512_set1_epi64(1), v_new_bucket, v_next,v_63 = _mm512_set1_epi64(63), v_key_off = _mm512_set1_epi64(
-          offsetof(bucket_t, tuples[0].key)),v_lzeros, v_previous, v_payload_off = _mm512_set1_epi64(offsetof(bucket_t, tuples[0].payload)), v_count_off = _mm512_set1_epi64(offsetof(bucket_t, count));
+      v_bucket_size = _mm512_set1_epi64(sizeof(bucket_t)), v_next_off = _mm512_set1_epi64(offsetof(bucket_t, next)), v_right_payload, v_addr, v_all_ones = _mm512_set1_epi64(-1),
+      v_conflict, v_one = _mm512_set1_epi64(1), v_new_bucket, v_next, v_63 = _mm512_set1_epi64(63), v_key_off = _mm512_set1_epi64(offsetof(bucket_t, tuples[0].key)), v_lzeros,
+      v_previous, v_payload_off = _mm512_set1_epi64(offsetof(bucket_t, tuples[0].payload)), v_count_off = _mm512_set1_epi64(offsetof(bucket_t, count));
   __m256i v256_one = _mm256_set1_epi32(1);
   tuple_t *join_res = NULL;
   uint64_t *pos = NULL, *new_bucket = (uint64_t*) &v_new_bucket;
   bucket_t * bucket;
   int tail_add = 0;
-  __attribute__((aligned(64)))                     uint64_t cur_offset = 0, base_off[16], *ht_pos;
+  __attribute__((aligned(64)))                       uint64_t cur_offset = 0, base_off[16], *ht_pos;
   for (int i = 0; i <= VECTOR_SCALE; ++i) {
     base_off[i] = i * sizeof(tuple_t);
     mask[i] = (1 << i) - 1;
   }
   v_base_offset = _mm512_load_epi64(base_off);
-  __attribute__((aligned(64)))                     StateSIMD state[SIMDStateSize + 1];
+  __attribute__((aligned(64)))                       StateSIMD state[SIMDStateSize + 1];
   // init # of the state
   for (int i = 0; i <= SIMDStateSize; ++i) {
     state[i].stage = 1;
@@ -456,10 +476,10 @@ size_t build_DVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (m_no_conflict) {
           // write the key , payload, count, next to the nodes
-          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,tuples[0].key))), state[k].key, 1);
-          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,tuples[0].payload))), v_one, 1);
-          _mm512_mask_i64scatter_epi32(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,count))), v256_one, 1);
-          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,next))), v_zero512, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr, v_key_off), state[k].key, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr, v_payload_off), state[k].payload, 1);
+          _mm512_mask_i64scatter_epi32(0, m_no_conflict, _mm512_add_epi64(v_addr, v_count_off), v256_one, 1);
+//          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,next))), v_zero512, 1);
 
           state[k].m_have_tuple = _mm512_kandn(m_no_conflict, state[k].m_have_tuple);
           found += _mm_popcnt_u32(m_no_conflict);
@@ -476,6 +496,25 @@ size_t build_DVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (true) {
+#if SERIAL_BUILD
+          for (int i = 0; i < VECTOR_SCALE; ++i) {
+            new_bucket[i] = 0;
+            if (m_no_conflict & (1 << i)) {
+              get_new_bucket(&bucket, overflowbuf);
+              new_bucket[i] = bucket;
+            }
+          }
+          v_next = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_have_tuple, _mm512_add_epi64(state[k].ht_off, v_next_off), 0, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_key_off), state[k].key, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_payload_off), state[k].payload, 1);
+//          _mm512_mask_i64scatter_epi32(0, m_no_conflict, (v_new_bucket), v256_one, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_next_off), v_next, 1);
+
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].ht_off, v_next_off), v_new_bucket, 1);
+
+          found += _mm_popcnt_u32(m_no_conflict);
+          state[k].m_have_tuple = _mm512_kandn(m_no_conflict, state[k].m_have_tuple);
+#else
           for (int i = 0; i < VECTOR_SCALE; ++i) {
             new_bucket[i] = 0;
             if (m_to_insert & (1 << i)) {
@@ -489,17 +528,17 @@ size_t build_DVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
 //          _mm512_mask_i64scatter_epi32(0, m_to_insert, (v_new_bucket), v256_one, 1);
           _mm512_mask_i64scatter_epi64(0, m_to_insert, _mm512_add_epi64(v_new_bucket, v_next_off), v_next, 1);
 
-          // conflict-free insert
+          // conflict-solved insert
           v_lzeros = _mm512_lzcnt_epi64(v_conflict);
           v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
           to_scatt = _mm512_kandn(m_no_conflict, m_to_insert);
           v_previous = _mm512_maskz_permutexvar_epi64(to_scatt, v_lzeros, v_new_bucket);
-          _mm512_mask_i64scatter_epi64(0, to_scatt,  _mm512_add_epi64(v_previous, v_next_off), v_new_bucket, 1);
+          _mm512_mask_i64scatter_epi64(0, to_scatt, _mm512_add_epi64(v_previous, v_next_off), v_new_bucket, 1);
 
           _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].ht_off, v_next_off), v_new_bucket, 1);
           found += _mm_popcnt_u32(m_to_insert);
-
           state[k].m_have_tuple = _mm512_kandn(m_to_insert, state[k].m_have_tuple);
+#endif	
         }
 
         if (state[k].m_have_tuple) {
@@ -526,25 +565,25 @@ size_t build_DVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
 }
 size_t build_FVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) {
   int32_t found = 0, k = 0, done = 0, num, num_temp, new_add;
-  __attribute__((aligned(64)))           __mmask8 to_scatt=0, m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict, m_full = -1;
+  __attribute__((aligned(64)))             __mmask8 to_scatt = 0, m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict, m_full = -1;
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(rel->num_tuples * sizeof(tuple_t)), v_base_offset, v_ht_cell, v_factor = _mm512_set1_epi64(
       ht->hash_mask), v_shift = _mm512_set1_epi64(ht->skip_bits), v_cell_hash, v_neg_one512 = _mm512_set1_epi64(-1), v_zero512 = _mm512_set1_epi64(0), v_write_index =
       _mm512_set1_epi64(0), v_ht_addr = _mm512_set1_epi64((uint64_t) ht->buckets), v_word_size = _mm512_set1_epi64(WORDSIZE), v_tuple_size = _mm512_set1_epi64(sizeof(tuple_t)),
-      v_bucket_size = _mm512_set1_epi64(sizeof(bucket_t)), v_next_off = _mm512_set1_epi64(offsetof(bucket_t, next)), v_right_payload, v_addr,
-      v_all_ones = _mm512_set1_epi64(-1), v_conflict, v_one = _mm512_set1_epi64(1), v_new_bucket, v_next,v_63 = _mm512_set1_epi64(63), v_key_off = _mm512_set1_epi64(
-          offsetof(bucket_t, tuples[0].key)),v_lzeros, v_previous, v_payload_off = _mm512_set1_epi64(offsetof(bucket_t, tuples[0].payload)), v_count_off = _mm512_set1_epi64(offsetof(bucket_t, count));
+      v_bucket_size = _mm512_set1_epi64(sizeof(bucket_t)), v_next_off = _mm512_set1_epi64(offsetof(bucket_t, next)), v_right_payload, v_addr, v_all_ones = _mm512_set1_epi64(-1),
+      v_conflict, v_one = _mm512_set1_epi64(1), v_new_bucket, v_next, v_63 = _mm512_set1_epi64(63), v_key_off = _mm512_set1_epi64(offsetof(bucket_t, tuples[0].key)), v_lzeros,
+      v_previous, v_payload_off = _mm512_set1_epi64(offsetof(bucket_t, tuples[0].payload)), v_count_off = _mm512_set1_epi64(offsetof(bucket_t, count));
   __m256i v256_one = _mm256_set1_epi32(1);
   tuple_t *join_res = NULL;
   uint64_t *pos = NULL, *new_bucket = (uint64_t*) &v_new_bucket;
   bucket_t * bucket;
   int tail_add = 0;
-  __attribute__((aligned(64)))                     uint64_t cur_offset = 0, base_off[16], *ht_pos;
+  __attribute__((aligned(64)))                       uint64_t cur_offset = 0, base_off[16], *ht_pos;
   for (int i = 0; i <= VECTOR_SCALE; ++i) {
     base_off[i] = i * sizeof(tuple_t);
     mask[i] = (1 << i) - 1;
   }
   v_base_offset = _mm512_load_epi64(base_off);
-  __attribute__((aligned(64)))                     StateSIMD state[SIMDStateSize + 1];
+  __attribute__((aligned(64)))                       StateSIMD state[SIMDStateSize + 1];
   // init # of the state
   for (int i = 0; i <= SIMDStateSize; ++i) {
     state[i].stage = 1;
@@ -623,11 +662,10 @@ size_t build_FVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (m_no_conflict) {
           // write the key , payload, count, next to the nodes
-          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,tuples[0].key))), state[k].key, 1);
-          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,tuples[0].payload))), v_one, 1);
-          _mm512_mask_i64scatter_epi32(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,count))), v256_one, 1);
-          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,next))), v_zero512, 1);
-
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr, v_key_off), state[k].key, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr, v_payload_off), state[k].payload, 1);
+          _mm512_mask_i64scatter_epi32(0, m_no_conflict, _mm512_add_epi64(v_addr, v_count_off), v256_one, 1);
+//          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,next))), v_zero512, 1);
           state[k].m_have_tuple = _mm512_kandn(m_no_conflict, state[k].m_have_tuple);
           found += _mm_popcnt_u32(m_no_conflict);
         }
@@ -647,6 +685,25 @@ size_t build_FVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
         m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
         m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
         if (true) {
+#if SERIAL_BUILD
+          for (int i = 0; i < VECTOR_SCALE; ++i) {
+            new_bucket[i] = 0;
+            if (m_no_conflict & (1 << i)) {
+              get_new_bucket(&bucket, overflowbuf);
+              new_bucket[i] = bucket;
+            }
+          }
+          v_next = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_have_tuple, _mm512_add_epi64(state[k].ht_off, v_next_off), 0, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_key_off), state[k].key, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_payload_off), state[k].payload, 1);
+//          _mm512_mask_i64scatter_epi32(0, m_no_conflict, (v_new_bucket), v256_one, 1);
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_next_off), v_next, 1);
+
+          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].ht_off, v_next_off), v_new_bucket, 1);
+
+          found += _mm_popcnt_u32(m_no_conflict);
+          state[k].m_have_tuple = _mm512_kandn(m_no_conflict, state[k].m_have_tuple);
+#else
           for (int i = 0; i < VECTOR_SCALE; ++i) {
             new_bucket[i] = 0;
             if (m_to_insert & (1 << i)) {
@@ -660,17 +717,17 @@ size_t build_FVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
 //          _mm512_mask_i64scatter_epi32(0, m_to_insert, (v_new_bucket), v256_one, 1);
           _mm512_mask_i64scatter_epi64(0, m_to_insert, _mm512_add_epi64(v_new_bucket, v_next_off), v_next, 1);
 
-          // conflict-free insert
+          // conflict-solved insert
           v_lzeros = _mm512_lzcnt_epi64(v_conflict);
           v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
           to_scatt = _mm512_kandn(m_no_conflict, m_to_insert);
           v_previous = _mm512_maskz_permutexvar_epi64(to_scatt, v_lzeros, v_new_bucket);
-          _mm512_mask_i64scatter_epi64(0, to_scatt,  _mm512_add_epi64(v_previous, v_next_off), v_new_bucket, 1);
+          _mm512_mask_i64scatter_epi64(0, to_scatt, _mm512_add_epi64(v_previous, v_next_off), v_new_bucket, 1);
 
           _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].ht_off, v_next_off), v_new_bucket, 1);
           found += _mm_popcnt_u32(m_to_insert);
-
           state[k].m_have_tuple = _mm512_kandn(m_to_insert, state[k].m_have_tuple);
+#endif
         }
         if (m_full == state[k].m_have_tuple) {
           ht_pos = (uint64_t *) &state[k].ht_off;
@@ -692,24 +749,26 @@ size_t build_FVA(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf
 }
 size_t build_SIMD(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf) {
   int32_t found = 0, k = 0, done = 0, num, num_temp, new_add;
-  __attribute__((aligned(64)))           __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict, m_full = -1;
+  __attribute__((aligned(64)))     __mmask8 to_scatt = 0, m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1], m_to_insert = 0, m_no_conflict, m_full = -1;
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(rel->num_tuples * sizeof(tuple_t)), v_base_offset, v_ht_cell, v_factor = _mm512_set1_epi64(
       ht->hash_mask), v_shift = _mm512_set1_epi64(ht->skip_bits), v_cell_hash, v_neg_one512 = _mm512_set1_epi64(-1), v_zero512 = _mm512_set1_epi64(0), v_write_index =
       _mm512_set1_epi64(0), v_ht_addr = _mm512_set1_epi64((uint64_t) ht->buckets), v_word_size = _mm512_set1_epi64(WORDSIZE), v_tuple_size = _mm512_set1_epi64(sizeof(tuple_t)),
-      v_bucket_size = _mm512_set1_epi64(sizeof(bucket_t)), v_next_off = _mm512_set1_epi64(offsetof(bucket_t, next)), v_right_payload, v_payload_off = _mm512_set1_epi64(24), v_addr,
-      v_all_ones = _mm512_set1_epi64(-1), v_conflict, v_one = _mm512_set1_epi64(1), v_new_bucket, v_next;
+      v_bucket_size = _mm512_set1_epi64(sizeof(bucket_t)), v_next_off = _mm512_set1_epi64(offsetof(bucket_t, next)), v_right_payload, v_addr, v_all_ones = _mm512_set1_epi64(-1),
+      v_conflict, v_one = _mm512_set1_epi64(1), v_new_bucket, v_next, v_63 = _mm512_set1_epi64(63), v_key_off = _mm512_set1_epi64(offsetof(bucket_t, tuples[0].key)), v_lzeros,
+      v_previous, v_payload_off = _mm512_set1_epi64(offsetof(bucket_t, tuples[0].payload)), v_count_off = _mm512_set1_epi64(offsetof(bucket_t, count));
+  ;
   __m256i v256_one = _mm256_set1_epi32(1);
   tuple_t *join_res = NULL;
   uint64_t *pos = NULL, *new_bucket = (uint64_t*) &v_new_bucket;
   bucket_t * bucket;
   int tail_add = 0;
-  __attribute__((aligned(64)))         uint64_t cur_offset = 0, base_off[16], *ht_pos;
+  __attribute__((aligned(64)))           uint64_t cur_offset = 0, base_off[16], *ht_pos;
   for (int i = 0; i <= VECTOR_SCALE; ++i) {
     base_off[i] = i * sizeof(tuple_t);
     mask[i] = (1 << i) - 1;
   }
   v_base_offset = _mm512_load_epi64(base_off);
-  __attribute__((aligned(64)))        StateSIMD state[1];
+  __attribute__((aligned(64)))          StateSIMD state[1];
   // init # of the state
   for (int i = 0; i < 1; ++i) {
     state[i].stage = 1;
@@ -764,11 +823,10 @@ size_t build_SIMD(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbu
     m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
     if (m_no_conflict) {
       // write the key , payload, count, next to the nodes
-      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,tuples[0].key))), state[k].key, 1);
-      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,tuples[0].payload))), v_one, 1);
-      _mm512_mask_i64scatter_epi32(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,count))), v256_one, 1);
-      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,next))), v_zero512, 1);
-
+      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr, v_key_off), state[k].key, 1);
+      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr, v_payload_off), state[k].payload, 1);
+      _mm512_mask_i64scatter_epi32(0, m_no_conflict, _mm512_add_epi64(v_addr, v_count_off), v256_one, 1);
+//          _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_addr,_mm512_set1_epi64(offsetof(bucket_t,next))), v_zero512, 1);
       state[k].m_have_tuple = _mm512_kandn(m_no_conflict, state[k].m_have_tuple);
       found += _mm_popcnt_u32(m_no_conflict);
     }
@@ -779,7 +837,8 @@ size_t build_SIMD(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbu
     v_conflict = _mm512_conflict_epi64(v_addr);
     m_no_conflict = _mm512_testn_epi64_mask(v_conflict, v_all_ones);
     m_no_conflict = _mm512_kand(m_no_conflict, m_to_insert);
-    if (m_no_conflict) {
+    if (true) {
+#if SERIAL_BUILD
       for (int i = 0; i < VECTOR_SCALE; ++i) {
         new_bucket[i] = 0;
         if (m_no_conflict & (1 << i)) {
@@ -788,14 +847,40 @@ size_t build_SIMD(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbu
         }
       }
       v_next = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_have_tuple, _mm512_add_epi64(state[k].ht_off, v_next_off), 0, 1);
-      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket,_mm512_set1_epi64(offsetof(bucket_t,tuples[0].key))), state[k].key, 1);
-      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket,_mm512_set1_epi64(offsetof(bucket_t,tuples[0].payload))), v_one, 1);
-      _mm512_mask_i64scatter_epi32(0, m_no_conflict, _mm512_add_epi64(v_new_bucket,_mm512_set1_epi64(offsetof(bucket_t,count))), v256_one, 1);
-      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket,_mm512_set1_epi64(offsetof(bucket_t,next))), v_next, 1);
+      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_key_off), state[k].key, 1);
+      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_payload_off), state[k].payload, 1);
+//          _mm512_mask_i64scatter_epi32(0, m_no_conflict, (v_new_bucket), v256_one, 1);
+      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(v_new_bucket, v_next_off), v_next, 1);
+
       _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].ht_off, v_next_off), v_new_bucket, 1);
 
       found += _mm_popcnt_u32(m_no_conflict);
       state[k].m_have_tuple = _mm512_kandn(m_no_conflict, state[k].m_have_tuple);
+#else
+      for (int i = 0; i < VECTOR_SCALE; ++i) {
+        new_bucket[i] = 0;
+        if (m_to_insert & (1 << i)) {
+          get_new_bucket(&bucket, overflowbuf);
+          new_bucket[i] = bucket;
+        }
+      }
+      v_next = _mm512_mask_i64gather_epi64(v_all_ones, state[k].m_have_tuple, _mm512_add_epi64(state[k].ht_off, v_next_off), 0, 1);
+      _mm512_mask_i64scatter_epi64(0, m_to_insert, _mm512_add_epi64(v_new_bucket, v_key_off), state[k].key, 1);
+      _mm512_mask_i64scatter_epi64(0, m_to_insert, _mm512_add_epi64(v_new_bucket, v_payload_off), state[k].payload, 1);
+//          _mm512_mask_i64scatter_epi32(0, m_to_insert, (v_new_bucket), v256_one, 1);
+      _mm512_mask_i64scatter_epi64(0, m_to_insert, _mm512_add_epi64(v_new_bucket, v_next_off), v_next, 1);
+
+      // conflict-solved insert
+      v_lzeros = _mm512_lzcnt_epi64(v_conflict);
+      v_lzeros = _mm512_sub_epi64(v_63, v_lzeros);
+      to_scatt = _mm512_kandn(m_no_conflict, m_to_insert);
+      v_previous = _mm512_maskz_permutexvar_epi64(to_scatt, v_lzeros, v_new_bucket);
+      _mm512_mask_i64scatter_epi64(0, to_scatt, _mm512_add_epi64(v_previous, v_next_off), v_new_bucket, 1);
+
+      _mm512_mask_i64scatter_epi64(0, m_no_conflict, _mm512_add_epi64(state[k].ht_off, v_next_off), v_new_bucket, 1);
+      found += _mm_popcnt_u32(m_to_insert);
+      state[k].m_have_tuple = _mm512_kandn(m_to_insert, state[k].m_have_tuple);
+#endif
     }
   }
 
@@ -803,19 +888,19 @@ size_t build_SIMD(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbu
 }
 
 volatile static char g_lock = 0, g_lock_morse = 0;
-volatile static uint64_t total_num = 0, global_curse = 0, global_upper, thread_num = 1;
+volatile static uint64_t total_num = 0, global_curse = 0, global_upper, thread_num = 1,global_morse_size;
 typedef int64_t (*BuildFun)(hashtable_t *ht, relation_t *rel, bucket_buffer_t **overflowbuf);
 volatile static struct Fun {
   BuildFun fun_ptr;
   char fun_name[8];
 } pfun[10];
 volatile static int pf_num = 0;
-static map<int64_t,int64_t>len2num;
-static void search_ht(hashtable_t *ht){
-  int64_t len=0;
-  for(int64_t i=0;i<ht->num_buckets;++i){
-    len=0;
-    for(auto it= ht->buckets+i;it;it=it->next){
+static map<int64_t, int64_t> len2num;
+static void search_ht(hashtable_t *ht) {
+  int64_t len = 0;
+  for (int64_t i = 0; i < ht->num_buckets; ++i) {
+    len = 0;
+    for (auto it = ht->buckets + i; it; it = it->next) {
       len++;
     }
     len2num[len]++;
@@ -831,12 +916,12 @@ static void morse_driven(void*param, BuildFun fun, bucket_buffer_t **overflowbuf
   while (1) {
     lock(&g_lock_morse);
     base = global_curse;
-    global_curse += MORSE_SIZE;
+    global_curse += global_morse_size;
     unlock(&g_lock_morse);
     if (base >= global_upper) {
       break;
     }
-    num = (global_upper - base) < MORSE_SIZE ? (global_upper - base) : MORSE_SIZE;
+    num = (global_upper - base) < global_morse_size ? (global_upper - base) : global_morse_size;
     relS.tuples = args->relS.tuples + base;
     relS.num_tuples = num;
     args->num_results += fun(args->ht, &relS, overflowbuf);
@@ -852,19 +937,19 @@ void *build_thread(void *param) {
   hashtable_t *ht;
   uint32_t nbuckets = (args->relR.num_tuples / BUCKET_SIZE / thread_num);
   if (args->tid == 0) {
-    strcpy(pfun[0].fun_name, "IMV");
-    strcpy(pfun[1].fun_name, "AMAC");
-    strcpy(pfun[2].fun_name, "FVA");
-    strcpy(pfun[3].fun_name, "DVA");
-    strcpy(pfun[4].fun_name, "SIMD");
-    strcpy(pfun[5].fun_name, "Naive");
+    strcpy(pfun[5].fun_name, "IMV");
+    strcpy(pfun[4].fun_name, "AMAC");
+    strcpy(pfun[3].fun_name, "FVA");
+    strcpy(pfun[2].fun_name, "DVA");
+    strcpy(pfun[1].fun_name, "SIMD");
+    strcpy(pfun[0].fun_name, "Naive");
 
-    pfun[0].fun_ptr = build_imv;
-    pfun[1].fun_ptr = build_AMAC;
-    pfun[2].fun_ptr = build_FVA;
-    pfun[3].fun_ptr = build_DVA;
-    pfun[4].fun_ptr = build_SIMD;
-    pfun[5].fun_ptr = build_raw;
+    pfun[5].fun_ptr = build_imv;
+    pfun[4].fun_ptr = build_AMAC;
+    pfun[3].fun_ptr = build_FVA;
+    pfun[2].fun_ptr = build_DVA;
+    pfun[1].fun_ptr = build_SIMD;
+    pfun[0].fun_ptr = build_raw;
 
     pf_num = 6;
   }
@@ -900,15 +985,15 @@ void *build_thread(void *param) {
         gettimeofday(&t2, NULL);
         printf("total result num = %lld\t", total_num);
         deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-        printf("---- %5s BUILD costs time (ms) = %10.4lf , tid = %3d\n", pfun[fid].fun_name, deltaT * 1.0 / 1000, args->tid);
+        printf("---- %5s BUILD costs time (ms) = %10.4lf\n", pfun[fid].fun_name, deltaT * 1.0 / 1000);
         total_num = 0;
         global_curse = 0;
-        for(auto iter:len2num){
-          cout<<"ht  cnum = "<<iter.first<<" , times = "<<iter.second<<endl;
-          if(total_num++>20)
+        for (auto iter : len2num) {
+          cout << "ht  cnum = " << iter.first << " , times = " << iter.second << endl;
+          if (total_num++ > 20)
             break;
         }
-        total_num=0;
+        total_num = 0;
         len2num.clear();
       }
       destroy_hashtable(ht);
@@ -955,7 +1040,7 @@ result_t *BUILD(relation_t *relR, relation_t *relS, int nthreads) {
   joinresult->nthreads = nthreads;
   return joinresult;
 #endif
-  uint32_t nbuckets = (relR->num_tuples / BUCKET_SIZE / thread_num);
+  uint32_t nbuckets = (relS->num_tuples / BUCKET_SIZE / thread_num);
   allocate_hashtable(&ht, nbuckets);
 
   numR = relR->num_tuples;
@@ -970,6 +1055,11 @@ result_t *BUILD(relation_t *relR, relation_t *relS, int nthreads) {
   }
   global_curse = 0;
   global_upper = relS->num_tuples;
+  if(nthreads==1){
+    global_morse_size= relS->num_tuples;
+  }else{
+    global_morse_size = MORSE_SIZE;
+  }
   pthread_attr_init(&attr);
   for (i = 0; i < nthreads; i++) {
     int cpu_idx = get_cpu_id(i);
@@ -983,14 +1073,14 @@ result_t *BUILD(relation_t *relR, relation_t *relS, int nthreads) {
     args[i].tid = i;
     args[i].ht = ht;
     args[i].barrier = &barrier;
-#if TEST_NUMA
-    args[i].relR.num_tuples = relR->num_tuples;
-    args[i].relR.tuples = relR->tuples;
-#else
+#if DIVIDE
     /* assing part of the relR for next thread */
     args[i].relR.num_tuples = (i == (nthreads - 1)) ? numR : numRthr;
     args[i].relR.tuples = relR->tuples + numRthr * i;
     numR -= numRthr;
+#else
+    args[i].relR.num_tuples = relR->num_tuples;
+    args[i].relR.tuples = relR->tuples;
 #endif
 #if DIVIDE
     /* assing part of the relS for next thread */

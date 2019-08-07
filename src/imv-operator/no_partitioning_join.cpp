@@ -628,7 +628,7 @@ void build_hashtable_mt(hashtable_t *ht, relation_t *rel, bucket_buffer_t **over
  * @return
  */
 volatile static char g_lock = 0, g_lock_morse = 0;
-volatile static uint64_t total_num = 0, global_curse = 0, global_upper;
+volatile static uint64_t total_num = 0, global_curse = 0, global_upper, global_morse_size;
 typedef int64_t (*ProbeFun)(hashtable_t *ht, relation_t *rel, void *output);
 volatile struct Fun {
   ProbeFun fun_ptr;
@@ -645,12 +645,12 @@ void morse_driven(void*param, ProbeFun fun, void*output) {
   while (1) {
     lock(&g_lock_morse);
     base = global_curse;
-    global_curse += MORSE_SIZE;
+    global_curse += global_morse_size;
     unlock(&g_lock_morse);
     if (base >= global_upper) {
       break;
     }
-    num = (global_upper - base) < MORSE_SIZE ? (global_upper - base) : MORSE_SIZE;
+    num = (global_upper - base) < global_morse_size ? (global_upper - base) : global_morse_size;
     relS.tuples = args->relS.tuples + base;
     relS.num_tuples = num;
     args->num_results += fun(args->ht, &relS, output);
@@ -717,19 +717,19 @@ void *npo_thread(void *param) {
     puts("+++++sleep end  +++++");
   }
   if (args->tid == 0) {
-    strcpy(pfun[0].fun_name, "IMV");
-    strcpy(pfun[1].fun_name, "AMAC");
-    strcpy(pfun[2].fun_name, "FVA");
-    strcpy(pfun[3].fun_name, "DVA");
-    strcpy(pfun[4].fun_name, "SIMD");
-    strcpy(pfun[5].fun_name, "Naive");
+    strcpy(pfun[5].fun_name, "IMV");
+    strcpy(pfun[4].fun_name, "AMAC");
+    strcpy(pfun[3].fun_name, "FVA");
+    strcpy(pfun[2].fun_name, "DVA");
+    strcpy(pfun[1].fun_name, "SIMD");
+    strcpy(pfun[0].fun_name, "Naive");
 
-    pfun[0].fun_ptr = smv_probe;
-    pfun[1].fun_ptr = probe_AMAC;
-    pfun[2].fun_ptr = probe_simd_amac;
-    pfun[3].fun_ptr = probe_simd_amac_raw;
-    pfun[4].fun_ptr = probe_simd;
-    pfun[5].fun_ptr = probe_hashtable;
+    pfun[5].fun_ptr = smv_probe;
+    pfun[4].fun_ptr = probe_AMAC;
+    pfun[3].fun_ptr = probe_simd_amac;
+    pfun[2].fun_ptr = probe_simd_amac_raw;
+    pfun[1].fun_ptr = probe_simd;
+    pfun[0].fun_ptr = probe_hashtable;
 
     pf_num = 6;
   }
@@ -796,7 +796,7 @@ void *npo_thread(void *param) {
         gettimeofday(&t2, NULL);
         printf("total result num = %lld\t", total_num);
         deltaT = (t2.tv_sec - t1.tv_sec) * 1000000 + t2.tv_usec - t1.tv_usec;
-        printf("---- %5s probe costs time (ms) = %10.4lf , tid = %3d\n", pfun[fid].fun_name, deltaT * 1.0 / 1000, args->tid);
+        printf("---- %5s probe costs time (ms) = %10.4lf\n", pfun[fid].fun_name, deltaT * 1.0 / 1000);
         total_num = 0;
         global_curse = 0;
 
@@ -924,17 +924,17 @@ result_t *NPO(relation_t *relR, relation_t *relS, int nthreads) {
 #endif
 
 #if USE_TBB
-  pthread_attr_init(&attr);
-  for (i = 0; i < nthreads; i++) {
-    int cpu_idx = get_cpu_id(i);
-
-    DEBUGMSG(1, "Assigning thread-%d to CPU-%d\n", i, cpu_idx);
-#if AFFINITY
-    CPU_ZERO(&set);
-    CPU_SET(cpu_idx, &set);
-    pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &set);
-#endif
-  }
+//  pthread_attr_init(&attr);
+//  for (i = 0; i < nthreads; i++) {
+//    int cpu_idx = get_cpu_id(i);
+//
+//    DEBUGMSG(1, "Assigning thread-%d to CPU-%d\n", i, cpu_idx);
+//#if AFFINITY
+//    CPU_ZERO(&set);
+//    CPU_SET(cpu_idx, &set);
+//    pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &set);
+//#endif
+//  }
 
   tbb_run(relR, relS, nthreads);
   joinresult->totalresults = result;
@@ -956,7 +956,11 @@ result_t *NPO(relation_t *relR, relation_t *relS, int nthreads) {
   }
   global_curse = 0;
   global_upper = relS->num_tuples;
-
+  if (nthreads == 1) {
+    global_morse_size = relS->num_tuples;
+  } else {
+    global_morse_size = MORSE_SIZE;
+  }
   pthread_attr_init(&attr);
   for (i = 0; i < nthreads; i++) {
     int cpu_idx = get_cpu_id(i);
