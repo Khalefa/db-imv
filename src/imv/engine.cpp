@@ -42,7 +42,7 @@ auto aggFun = &agg_raw;
 auto buildFun = &build_raw;
 
 auto constrant_o_orderdate = types::Date::castString("1996-01-01");
-types::Numeric<12, 2> constrant_l_quantity = types::Numeric<12, 2>(types::Integer(24));
+types::Numeric<12, 2> constrant_l_quantity = types::Numeric<12, 2>(types::Integer(CONSTRANT_L_QUAN));
 
 size_t nrTuples(Database& db, std::vector<std::string> tables) {
   size_t sum = 0;
@@ -489,8 +489,8 @@ bool join_vectorwise(Database& db, size_t nrThreads, size_t vectorSize) {
 void test_vectorwise_sel_probe(Database& db, size_t nrThreads, PerfEvents &e) {
   size_t vectorSize = 1024;
   vector<pair<string, decltype(vectorJoinFun)> > vectorName2fun;
-  vectorName2fun.push_back(make_pair("joinAllSIMD", &vectorwise::Hashjoin::joinSelSIMD));
-  vectorName2fun.push_back(make_pair("joinAllParallel", &vectorwise::Hashjoin::joinSelParallel));
+  vectorName2fun.push_back(make_pair("joinSelSIMD", &vectorwise::Hashjoin::joinSelSIMD));
+  vectorName2fun.push_back(make_pair("joinSelParallel", &vectorwise::Hashjoin::joinSelParallel));
   vectorName2fun.push_back(make_pair("joinIMV", &vectorwise::Hashjoin::joinSelIMV));
 
   for (auto name2fun : vectorName2fun) {
@@ -521,8 +521,8 @@ int main(int argc, char* argv[]) {
   bool clearCaches = false;
   if (argc > 3)
     nrThreads = atoi(argv[3]);
- ptimer.reset();
   tbb::task_scheduler_init scheduler(nrThreads);
+ ptimer.reset();
   e.timeAndProfile("compilation", nrTuples(tpch, { "orders", "lineitem" }), [&]() {
     Qa_compilation(tpch, nrThreads);
   },

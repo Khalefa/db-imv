@@ -1,6 +1,7 @@
 #include "imv/Pipeline.hpp"
-auto c3 = types::Integer(24);
-uint64_t constrants = c3.value * 100;
+auto constrant_o_orderdate1 = types::Date::castString("1996-01-01");
+types::Numeric<12, 2> constrant_l_quantity1 = types::Numeric<12, 2>(types::Integer(CONSTRANT_L_QUAN));
+uint64_t constrants = constrant_l_quantity1.value;
 size_t scan_filter_simd(types::Numeric<12, 2>* col, size_t& begin, size_t end, int constrants, uint64_t* pos_buff) {
   size_t found = 0;
   __mmask8 m_valid = -1, m_eval;

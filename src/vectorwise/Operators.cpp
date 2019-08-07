@@ -350,6 +350,7 @@ pos_t Hashjoin::joinIMV() {
   imv_cont.k = 100;
   return found;
 }
+#define PDISD 128
 pos_t Hashjoin::joinSelIMV() {
   size_t found = 0;
   if (imv_cont.k == 100) {
@@ -398,6 +399,10 @@ pos_t Hashjoin::joinSelIMV() {
         imv_state[imv_cont.k]->v_probe_offset = _mm512_add_epi64(_mm512_set1_epi64(cont.nextProbe), v_base_offset);
         imv_state[imv_cont.k]->m_valid_probe = _mm512_cmpgt_epu64_mask(v_base_offset_upper, imv_state[imv_cont.k]->v_probe_offset);
         imv_state[imv_cont.k]->v_probe_offset = _mm512_cvtepi32_epi64(_mm256_maskz_loadu_epi32(imv_state[imv_cont.k]->m_valid_probe, (char*)(probeSel+cont.nextProbe)));
+#if SEQ_PREFETCH ||1
+          _mm_prefetch((char*)(probeKeys+ probeSel[cont.nextProbe+PDISD >= cont.numProbes? cont.nextProbe:cont.nextProbe+PDISD]), _MM_HINT_T0);
+          _mm_prefetch(((char*)(probeKeys+ probeSel[cont.nextProbe+PDISD >= cont.numProbes? cont.nextProbe:cont.nextProbe+PDISD])+64), _MM_HINT_T0);
+#endif
         /// step 2: gather the probe keys
         v256_probe_keys = _mm512_mask_i64gather_epi32(v256_zero, imv_state[imv_cont.k]->m_valid_probe, imv_state[imv_cont.k]->v_probe_offset, (void* )probeKeys, 4);
         //v256_probe_keys = _mm256_maskz_loadu_epi32(imv_state[imv_cont.k]->m_valid_probe, (char*)(probeKeys+cont.nextProbe));
@@ -1473,7 +1478,7 @@ size_t Hashjoin::next() {
    if (!consumed) {
       size_t found = 0;
 
-    if (join == &vectorwise::Hashjoin::joinSIMDAMAC || join == &vectorwise::Hashjoin::joinIMV || join == &vectorwise::Hashjoin::joinSelIMV) {
+    if (join == &vectorwise::Hashjoin::joinSelIMV) {
       barrier([&]() {
         if (!shared.sizeIsSet.load()) {
           shared.sizeIsSet.store(false);

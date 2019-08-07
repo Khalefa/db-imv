@@ -773,7 +773,7 @@ std::unique_ptr<Q3Builder::Q3> Q3Builder::getQuery() {
   auto result = Result();
   previous = result.resultWriter.shared.result->participate();
   auto r = make_unique<Q3>();
-#if JOINALL
+#if !JOINALL
   auto order = Scan("orders");
   auto lineitem = Scan("lineitem");
 
@@ -913,9 +913,9 @@ int main(int argc, char* argv[]) {
 //  pipeline(tpch, nrThreads);
 //join_hyper(tpch, nrThreads);
 //  join_vectorwise(tpch,nrThreads,1000);
-  test_agg(tpch, nrThreads);
+//  test_agg(tpch, nrThreads);
 
-// test_vectorwise_probe(tpch, nrThreads);
+ test_vectorwise_probe(tpch, nrThreads);
 // test_vectorwise_sel_probe(tpch, nrThreads);
   scheduler.terminate();
   return 0;
