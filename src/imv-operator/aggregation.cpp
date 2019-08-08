@@ -1691,7 +1691,7 @@ result_t *AGG(relation_t *relR, relation_t *relS, int nthreads) {
   joinresult->resultlist = (threadresult_t *) alloc_aligned(sizeof(threadresult_t) * nthreads);
 #endif
 
-#if USE_TBB || 0
+#if USE_TBB && 0
   pthread_attr_init(&attr);
   for (i = 0; i < nthreads; i++) {
     int cpu_idx = get_cpu_id(i);

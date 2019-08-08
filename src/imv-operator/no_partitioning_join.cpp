@@ -225,44 +225,31 @@ int64_t probe_hashtable(hashtable_t *ht, relation_t *rel, void *output) {
   uint32_t i, j;
   int64_t matches;
 
-  const uint32_t hashmask = ht->hash_mask;
-  const uint32_t skipbits = ht->skip_bits;
-#ifdef PREFETCH_NPJ
-  size_t prefetch_index = PREFETCH_DISTANCE;
-#endif
-
+  const uint64_t hashmask = ht->hash_mask;
+  const uint64_t skipbits = ht->skip_bits;
   matches = 0;
   j = 0;
-
-#ifdef JOIN_RESULT_MATERIALIZE
+#if WRITE_RESULTS
   chainedtuplebuffer_t *chainedbuf = (chainedtuplebuffer_t *) output;
 #endif
 
   for (i = 0; i < rel->num_tuples; i++) {
     intkey_t idx = HASH(rel->tuples[i].key, hashmask, skipbits);
     bucket_t *b = ht->buckets + idx;
-
     do {
-#if MULTI_TUPLE
-      for (j = 0; j < b->count; j++) {
-#else
       if (b->count == 0) {
         break;
       }
-#endif
       if (rel->tuples[i].key == b->tuples[0].key) {
         matches++;
 
-#ifdef JOIN_RESULT_MATERIALIZE
+#if WRITE_RESULTS
         /* copy to the result buffer */
         tuple_t *joinres = cb_next_writepos(chainedbuf);
         joinres->key = b->tuples[0].payload; /* R-rid */
         joinres->payload = rel->tuples[i].payload; /* S-rid */
 #endif
       }
-#if MULTI_TUPLE
-    }
-#endif
       b = b->next; /* follow overflow pointer */
     } while (b);
   }

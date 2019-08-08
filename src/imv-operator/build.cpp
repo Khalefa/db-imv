@@ -1022,7 +1022,7 @@ result_t *BUILD(relation_t *relR, relation_t *relS, int nthreads) {
 #endif
 //  thread_num = nthreads;
 
-#if USE_TBB || 0
+#if USE_TBB && 0
   pthread_attr_init(&attr);
   for (i = 0; i < nthreads; i++) {
     int cpu_idx = get_cpu_id(i);
