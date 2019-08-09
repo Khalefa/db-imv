@@ -16,7 +16,7 @@
 
 #include "types.hpp"
 
-#define CHAINEDBUFF_NUMTUPLESPERBUF (64 * 1024)
+#define CHAINEDBUFF_NUMTUPLESPERBUF (4096)
 
 /** If rid-pairs are coming from a sort-merge join then 1, otherwise for hash
     joins it is always 0 since output is not sorted. */

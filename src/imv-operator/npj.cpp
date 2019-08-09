@@ -604,7 +604,7 @@ int64_t probe_simd_amac_compact(hashtable_t *ht, relation_t *rel, void *output) 
 int64_t smv_probe(hashtable_t *ht, relation_t *rel, void *output) {
   int64_t matches = 0;
   int32_t new_add = 0, k = 0, done = 0, num, num_temp;
-  __attribute__((aligned(64)))  __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1];
+  __attribute__((aligned(64)))  __mmask8 m_match = 0, m_new_cells = -1, m_valid_bucket = 0, mask[VECTOR_SCALE + 1],m_have_tuple;
   __m512i v_offset = _mm512_set1_epi64(0), v_base_offset_upper = _mm512_set1_epi64(rel->num_tuples * sizeof(tuple_t)), v_base_offset, v_ht_cell, v_factor = _mm512_set1_epi64(
       ht->hash_mask), v_shift = _mm512_set1_epi64(ht->skip_bits), v_cell_hash, v_neg_one512 = _mm512_set1_epi64(-1), v_zero512 = _mm512_set1_epi64(0), v_write_index =
       _mm512_set1_epi64(0), v_ht_addr = _mm512_set1_epi64((uint64_t)ht->buckets), v_word_size = _mm512_set1_epi64(WORDSIZE), v_tuple_size = _mm512_set1_epi64(sizeof(tuple_t)),
@@ -622,9 +622,9 @@ int64_t smv_probe(hashtable_t *ht, relation_t *rel, void *output) {
   for (int i = 0; i <= SIMDStateSize; ++i) {
     state[i].stage = 1;
     state[i].m_have_tuple = 0;
-    state[i].ht_off = _mm512_set1_epi64(0);
-    state[i].payload = _mm512_set1_epi64(0);
-    state[i].key = _mm512_set1_epi64(0);
+//    state[i].ht_off = _mm512_set1_epi64(0);
+//    state[i].payload = _mm512_set1_epi64(0);
+//    state[i].key = _mm512_set1_epi64(0);
   }
   for (uint64_t cur = 0; 1;) {
     k = (k >= SIMDStateSize) ? 0 : k;
@@ -652,7 +652,7 @@ int64_t smv_probe(hashtable_t *ht, relation_t *rel, void *output) {
 #if SEQPREFETCH
         _mm_prefetch((char *)(((void *)rel->tuples) + cur_offset + PDIS), _MM_HINT_T0);
         _mm_prefetch((char *)(((void *)rel->tuples) + cur_offset + PDIS + 64), _MM_HINT_T0);
-        _mm_prefetch((char *)(((void *)rel->tuples) + cur_offset + PDIS + 128), _MM_HINT_T0);
+//        _mm_prefetch((char *)(((void *)rel->tuples) + cur_offset + PDIS + 128), _MM_HINT_T0);
 #endif
         // directly use cur, instead of cur_offset to control the offset to rel.
         // In this case, using step = 16 to gather data, but step is larger
@@ -794,8 +794,8 @@ int64_t smv_probe(hashtable_t *ht, relation_t *rel, void *output) {
         join_res = cb_next_n_writepos(chainedbuf, new_add);
 #if SEQPREFETCH
         _mm_prefetch((char *)(((void *)join_res) + PDIS), _MM_HINT_T0);
-        _mm_prefetch((char *)(((void *)join_res) + PDIS + 64), _MM_HINT_T0);
-        _mm_prefetch((char *)(((void *)join_res) + PDIS + 128), _MM_HINT_T0);
+//        _mm_prefetch((char *)(((void *)join_res) + PDIS + 64), _MM_HINT_T0);
+//        _mm_prefetch((char *)(((void *)join_res) + PDIS + 128), _MM_HINT_T0);
 #endif
         v_write_index = _mm512_mask_expand_epi64(v_zero512, m_match, v_base_offset);
         _mm512_mask_i64scatter_epi64((void * )join_res, m_match, v_write_index, state[k].payload, 1);

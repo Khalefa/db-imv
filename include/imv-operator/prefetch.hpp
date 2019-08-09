@@ -14,7 +14,7 @@ typedef struct StateSIMD StateSIMD;
 
 #define ScalarStateSize 20
 #define PDIS 320
-#define SIMDStateSize 3
+#define SIMDStateSize 5
 #define WRITE_RESULTS 1
 #define LOAD_FACTOR 1
 #define MULTI_TUPLE (BUCKET_SIZE - 1)
@@ -25,10 +25,10 @@ typedef struct StateSIMD StateSIMD;
 #define SEQPREFETCH PDIS
 #define DIVIDE 0
 #define USE_TBB 0
-#define AFFINITY 1
+#define AFFINITY 0
 #define MORSE_SIZE 100000
 #define SORTED 0
-#define TEST_NUMA 1
+#define TEST_NUMA 0
 #if KNL
 #define _mm512_mullo_epi64(a, b) _mm512_mullo_epi32(a, b)
 #endif

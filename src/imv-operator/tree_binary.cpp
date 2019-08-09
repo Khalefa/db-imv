@@ -181,7 +181,7 @@ void *bts_thread(void *param) {
   tree_arg_t *args = (tree_arg_t *)param;
   struct timeval t1, t2;
   int deltaT = 0;
-#if TEST_NUMA
+#if TEST_NUMA && 0
   if (args->tid == 0) {
     build_tree_st(&tree_array[args->tid], &args->relR);
 
@@ -285,7 +285,7 @@ void *bts_thread(void *param) {
   args->threadresult->threadid = args->tid;
 // args->threadresult->results = (void *)chainedbuf;
 #endif
-#if TEST_NUMA
+#if TEST_NUMA && 0
   if(args->tid==0){
   chainedtnodebuffer_free(tree_array[0].buffer);
   chainedtnodebuffer_free(tree_array[1].buffer);
@@ -467,7 +467,7 @@ result_t *BTS(relation_t *relR, relation_t *relS, int nthreads) {
   }
   joinresult->totalresults = result;
   joinresult->nthreads = nthreads;
-#if !TEST_NUMA
+#if TEST_NUMA || 1
   chainedtnodebuffer_free(tree->buffer);
   free(tree);
 #endif
