@@ -22,11 +22,11 @@ Generating two main binaries:
 
   (1.1) generating data:
   ```
-  ./operator-a GEN -n 32 --r-size=1048576 --s-size=52428800 --r-skew=0 --s-skew=0  
+  ./operator -a GEN -n 32 --r-size=1048576 --s-size=52428800 --r-skew=1 --s-skew=1  
   ```
-  (1.2) testing individual operators: -a: Applications:(NPJ: hash join probe, BTS: binary tree search, BUILD and AGG), -n threads number.
+  (1.2) testing individual operators: -a: Applications:(NPO: hash join probe, BTS: binary tree search, BUILD and AGG), -n threads number.
   ```
-  ./operator -a NPJ -n 32 --r-file=r_skew=0_size=1M --s-file=s_skew=1_size=50M_max=11M
+  ./operator -a NPO -n 32 --r-file=r_skew=1_size=1M --s-file=s_skew=1_size=50M_max=1M
   ```
 
 (2) engine: 3 parameters: reteated times, data source and threads number
