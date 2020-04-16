@@ -1,3 +1,4 @@
+Paper: https://www.vldb.org/pvldb/vol13/p226-fang.pdf
 # Interleaved Multi-Vectorizing (IMV)
   This repository contains a collection of experiments to test the effects of IMV. It is mainly composed of two parts:
   
